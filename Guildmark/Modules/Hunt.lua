@@ -42,12 +42,16 @@ function Hunt:OnEnable()
 	self:ScheduleRepeatingTimer("ShareCache", CACHE_SHARE_EVERY)
 	-- En Forever la muerte con honor llega como «Has recibido N p. de honor.», sin la víctima:
 	-- se apunta qué jugador enemigo acaba de morir a la vista para atribuírsela.
+	-- RegisterUnitEvent admite como mucho dos unidades por marco: objetivo y foco en uno y el
+	-- ratón en otro. Además, al cambiar de objetivo se mira el anterior (por si acaba de morir).
 	if not self.healthWatch and CreateFrame then
-		self.healthWatch = CreateFrame("Frame")
+		self.healthWatch, self.mouseWatch = CreateFrame("Frame"), CreateFrame("Frame")
 		if self.healthWatch.RegisterUnitEvent then
-			pcall(self.healthWatch.RegisterUnitEvent, self.healthWatch, "UNIT_HEALTH", "target", "focus", "mouseover")
+			pcall(self.healthWatch.RegisterUnitEvent, self.healthWatch, "UNIT_HEALTH", "target", "focus")
+			pcall(self.mouseWatch.RegisterUnitEvent, self.mouseWatch, "UNIT_HEALTH", "mouseover")
 		end
 		self.healthWatch:SetScript("OnEvent", function(_, _, unit) self:NoteDeadEnemy(unit) end)
+		self.mouseWatch:SetScript("OnEvent", function(_, _, unit) self:NoteDeadEnemy(unit) end)
 	end
 end
 
@@ -63,6 +67,20 @@ function Hunt:NoteDeadEnemy(unit)
 	if not guid and not name then return end
 	if guid then self:CacheUnit(unit) end
 	lastDeadEnemy = { guid = guid, name = name, at = GetTime() }
+end
+
+-- Cómo estaban el objetivo, el foco y el ratón (para el diagnóstico de las muertes con honor).
+function Hunt:DescribeUnitsForDiag()
+	local parts = {}
+	for _, unit in ipairs({ "target", "focus", "mouseover" }) do
+		if UnitExists(unit) then
+			local name = ns.UnitFullName(unit) or "?"
+			parts[#parts + 1] = ("%s=%s jugador:%s amigo:%s muerto:%s"):format(unit, name, tostring(UnitIsPlayer(unit)),
+				tostring(UnitIsFriend and UnitIsFriend("player", unit)), tostring(UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit)))
+		end
+	end
+	if lastDeadEnemy then parts[#parts + 1] = ("ultimoMuerto=%s hace %.1fs"):format(lastDeadEnemy.name or "?", GetTime() - lastDeadEnemy.at) end
+	return #parts > 0 and table.concat(parts, " | ") or "nada a la vista"
 end
 
 -- La víctima más probable de una muerte con honor que llega sin nombre: un enemigo muerto
@@ -450,7 +468,14 @@ function Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(_, text)
 		-- vista (si no, es honor de una misión o de un objetivo de campo de batalla).
 		local awarded = text:match(toPattern(COMBATLOG_HONORAWARD))
 		if awarded then
+			local seen = self:DescribeUnitsForDiag()
 			local v = self:RecentVictim()
+			-- Diagnóstico (global.diag.honorAwards, los 5 últimos): qué había a la vista y a quién se atribuyó.
+			local diag = LG.db.global.diag
+			diag.honorAwards = diag.honorAwards or {}
+			table.insert(diag.honorAwards, 1, { t = date("%Y-%m-%d %H:%M:%S"), honor = tonumber(awarded), seen = seen,
+				victim = v and (v.name or v.guid) or nil, combatLog = self.hasCombatLog and true or nil })
+			for i = #diag.honorAwards, 6, -1 do diag.honorAwards[i] = nil end
 			if v and not self.hasCombatLog then self:OnKill(v.guid, v.name, tonumber(awarded) or 0) end
 			return
 		end
