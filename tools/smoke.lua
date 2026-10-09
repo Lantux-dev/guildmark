@@ -1548,6 +1548,28 @@ do
 	print_("OK tiempos por estadística de jefe final")
 end
 
+-- Auxilio contra jugadores sin hermandad: 3 muertes en 10 minutos en la misma zona, aunque los asesinos sean distintos.
+do
+	LG.db.profile.aidCalls = true
+	if ns.AidResetPopup then ns.AidResetPopup() end
+	local shown = {}
+	local savedShow = StaticPopup_Show
+	StaticPopup_Show = function(which, text, _, data) shown[#shown + 1] = { which = which, text = text, data = data } end
+	local me = ns.PlayerFullName()
+	for i = 1, 3 do
+		local rec = { id = "ng:death:" .. i, kind = "death", t = NOW - 30 + i, reporter = me, victimName = me,
+			killer = "Player-9-" .. i, killerName = "Suelto " .. i, zone = "Bosque del Ocaso" }
+		ns.MergeKill(g, rec)
+		ns.OnKillReceived(rec)
+	end
+	StaticPopup_Show = savedShow
+	local ask
+	for _, s in ipairs(shown) do if s.which == "LANTUX_AID_ASK" then ask = s end end
+	assert(ask and ask.data.enemy == ns.AID_GUILDLESS and ask.text:find(ns.AidEnemyName(ns.AID_GUILDLESS), 1, true), "auxilio contra jugadores sin hermandad")
+	for i = 1, 3 do g.kills["ng:death:" .. i] = nil end
+	print_("OK auxilio contra jugadores sin hermandad")
+end
+
 -- Campos de batalla: las muertes no piden auxilio ni crean objetivos; el resultado se registra y da insignias.
 do
 	local shown = {}

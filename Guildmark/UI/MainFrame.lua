@@ -1882,11 +1882,11 @@ local function callCards(g, rows, kind)
 				title = assault and (mine and (L["Tu hermandad asalta %s"]):format(c.zone) or (L["<%s> asalta %s"]):format(c.guild, c.zone))
 					or (mine and (L["Tu hermandad pide ayuda en %s"]):format(c.subzone or c.zone) or (L["<%s> pide ayuda en %s"]):format(c.guild, c.subzone or c.zone)),
 				desc = assault and ((c.open and L["abierto a la facción"] or L["solo la hermandad"]) .. "  ·  " .. layer)
-					or (L["contra <%s>  ·  %s  ·  %d muertes"]):format(c.enemy, layer, c.deaths or 0),
+					or (L["contra <%s>  ·  %s  ·  %d muertes"]):format(ns.AidEnemyName(c.enemy), layer, c.deaths or 0),
 				status = assault and (RED .. (L["en curso · %s"]):format(sinceText(c.t)) .. R) or (RED .. (L["quedan %s"]):format(minutesLeft(c.ends)) .. R),
 				foot = (here and (GREEN .. L["Estás en su capa."] .. R .. "  ·  ") or (goers[me] and grey(L["Has respondido: espera la invitación.  ·  "]) or ""))
 					.. grey(assault and (L["Acuden: %d  ·  bajas en la ciudad: %d"]):format(nGoers, ns.AidKills(c))
-						or (L["Acuden: %d  ·  bajas de <%s>: %d"]):format(nGoers, c.enemy, ns.AidKills(c))),
+						or (L["Acuden: %d  ·  bajas de <%s>: %d"]):format(nGoers, ns.AidEnemyName(c.enemy), ns.AidKills(c))),
 				buttons = btns,
 			}
 			if mine then
@@ -1925,7 +1925,7 @@ local function aidView(g, rows)
 		header(rows, L["Historial"])
 		for i = 1, math.min(10, #history) do
 			local c = history[i]
-			line(rows, ("%s  %s  %s"):format(grey(date("%d/%m %H:%M", c.t)), (L["Auxilio en %s contra <%s>"]):format(c.zone, c.enemy or "?"),
+			line(rows, ("%s  %s  %s"):format(grey(date("%d/%m %H:%M", c.t)), (L["Auxilio en %s contra <%s>"]):format(c.zone, ns.AidEnemyName(c.enemy)),
 				grey((L["%d bajas · acudieron %d de %d hermandades"]):format(c.kills or 0, c.goers or 0, c.guilds or 0))), 1, { icon = ICON_AID })
 		end
 	end

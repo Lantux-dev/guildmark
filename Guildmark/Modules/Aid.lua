@@ -126,10 +126,19 @@ local function sameZone(k, map, zone)
 end
 
 -- Bajas de los nuestros a manos de esa hermandad en esa zona en los últimos 10 minutos.
+-- Enemigos sin hermandad: por la red viaja esta marca (igual en todos los idiomas) y cada
+-- addon la muestra traducida. Así también se pide auxilio cuando os masacran jugadores sueltos.
+local GUILDLESS = "*"
+ns.AID_GUILDLESS = GUILDLESS
+function ns.AidEnemyName(enemy)
+	if enemy == GUILDLESS then return L["sin hermandad"] end
+	return enemy or "?"
+end
+
 local function recentDeaths(g, enemy, zone, now, map)
 	local n = 0
 	for _, k in pairs(g.kills) do
-		if k.kind == "death" and not k.bg and k.guild == enemy and sameZone(k, map, zone) and now - k.t <= TRIGGER_WINDOW and now >= k.t
+		if k.kind == "death" and not k.bg and (k.guild or GUILDLESS) == enemy and sameZone(k, map, zone) and now - k.t <= TRIGGER_WINDOW and now >= k.t
 			and not ns.IsVoided(g, k.id) then
 			n = n + 1
 		end
@@ -145,7 +154,7 @@ function ns.AidKills(call)
 	local assault = call.kind == "assault"
 	for _, k in pairs(g and g.kills or {}) do
 		local where = sameZone(k, call.map, call.zone)
-		if k.kind == "kill" and not k.bg and (assault or k.guild == call.enemy) and where and k.t >= call.t and k.t <= call.ends
+		if k.kind == "kill" and not k.bg and (assault or (k.guild or GUILDLESS) == call.enemy) and where and k.t >= call.t and k.t <= call.ends
 			and not ns.IsVoided(g, k.id) then
 			n = n + 1
 		end
@@ -206,19 +215,20 @@ StaticPopupDialogs["LANTUX_AID_INVITE"] = {
 
 -- Cada muerte de los nuestros (propia o de otro miembro): si es mía y ya van 3, pregunto.
 function ns.CheckAid(rec)
-	if rec.kind ~= "death" or rec.bg or not rec.guild or not rec.zone then return end
+	if rec.kind ~= "death" or rec.bg or not rec.zone or not (rec.killer or rec.killerName) then return end
 	if rec.victimName ~= ns.PlayerFullName() then return end
+	local enemy = rec.guild or GUILDLESS
 	local g = LG:GuildData()
 	if not g or not LG:HasConsent() then return end
 	local now = ns.Now()
-	local deaths = recentDeaths(g, rec.guild, rec.zone, now, rec.map)
+	local deaths = recentDeaths(g, enemy, rec.zone, now, rec.map)
 	if deaths < TRIGGER_DEATHS then return end
 	if myCall(LG:GuildName(), "help") then return end
-	local key = rec.guild .. "|" .. rec.zone
+	local key = enemy .. "|" .. rec.zone
 	if asked[key] and now - asked[key] < ASK_AGAIN then return end
 	asked[key] = now
-	local text = (L["<%s> os ha matado %d veces en %s en 10 minutos.\n¿Pedir ayuda a la %s?"]):format(rec.guild, deaths, rec.zone, factionName())
-	StaticPopup_Show("LANTUX_AID_ASK", text, nil, { enemy = rec.guild, zone = rec.zone, deaths = deaths })
+	local text = (L["<%s> os ha matado %d veces en %s en 10 minutos.\n¿Pedir ayuda a la %s?"]):format(ns.AidEnemyName(enemy), deaths, rec.zone, factionName())
+	StaticPopup_Show("LANTUX_AID_ASK", text, nil, { enemy = enemy, zone = rec.zone, deaths = deaths })
 end
 
 ---------------------------------------------------------------------------
@@ -249,7 +259,7 @@ ns.handlers.AIDREQ = function(sender, rec)
 	if rec.guild ~= LG:GuildName() or not ns.CanManageEvents(ns.PlayerFullName()) or not setting() then return end
 	pendingReq[rec.id] = rec
 	local text = (L["%s pide ayuda: <%s> os ha matado %d veces en %s.\n¿Enviar la llamada de auxilio a la %s?"]):format(
-		ns.ShortName(sender), rec.enemy, tonumber(rec.deaths) or 0, rec.zone, factionName())
+		ns.ShortName(sender), ns.AidEnemyName(rec.enemy), tonumber(rec.deaths) or 0, rec.zone, factionName())
 	StaticPopup_Show("LANTUX_AID_APPROVE", text, nil, rec)
 	if PlaySound and SOUNDKIT and SOUNDKIT.RAID_WARNING then pcall(PlaySound, SOUNDKIT.RAID_WARNING) end
 end
@@ -280,7 +290,7 @@ function ns.SendAid(rec, approvedBy)
 	if call.kind == "assault" then
 		LG:Print((call.open and L["Asalto a %s declarado y anunciado a la %s."] or L["Asalto a %s declarado (solo tu hermandad)."]):format(call.zone, factionName()))
 	elseif sent then
-		LG:Print((L["Llamada de auxilio enviada a la %s: %s, contra <%s>."]):format(factionName(), call.zone, call.enemy))
+		LG:Print((L["Llamada de auxilio enviada a la %s: %s, contra <%s>."]):format(factionName(), call.zone, ns.AidEnemyName(call.enemy)))
 	else
 		LG:Print(L["No se ha podido enviar la llamada por la red de hermandades; solo se ha enterado tu hermandad."])
 	end
@@ -333,14 +343,14 @@ local function announce(call)
 	if call.guild == LG:GuildName() then
 		pendingReq[call.id] = nil
 		if StaticPopup_Hide then StaticPopup_Hide("LANTUX_AID_APPROVE") end
-		LG:Print((L["Llamada de auxilio enviada a la %s: %s, contra <%s>."]):format(factionName(), call.zone, call.enemy))
+		LG:Print((L["Llamada de auxilio enviada a la %s: %s, contra <%s>."]):format(factionName(), call.zone, ns.AidEnemyName(call.enemy)))
 		-- Los nuestros que están en otra capa también pueden ir.
 		if call.by ~= ns.PlayerFullName() and not onLayer(call) then
-			StaticPopup_Show("LANTUX_AID_HELP", (L["Tu hermandad pide ayuda en %s contra <%s>.\n¿Ir a su capa? Te invitarán a su banda."]):format(call.zone, call.enemy), nil, call.id)
+			StaticPopup_Show("LANTUX_AID_HELP", (L["Tu hermandad pide ayuda en %s contra <%s>.\n¿Ir a su capa? Te invitarán a su banda."]):format(call.zone, ns.AidEnemyName(call.enemy)), nil, call.id)
 		end
 	elseif setting() then
 		local layer = call.layer and (" (" .. ns.LayerLabel(call.layer, call.map) .. ")") or ""
-		local msg = (L["<%s> pide ayuda en %s%s: <%s> les está cazando."]):format(call.guild, call.zone, layer, call.enemy)
+		local msg = (L["<%s> pide ayuda en %s%s: <%s> les está cazando."]):format(call.guild, call.zone, layer, ns.AidEnemyName(call.enemy))
 		-- Sin aviso de banda: la ventana de Acudir sale en el mismo sitio y lo taparía.
 		LG:Print("|cffff6b5a" .. msg .. "|r " .. L["Acude desde /gmk > JcJ > Auxilio."])
 		if popupAllowed(call) then
@@ -671,7 +681,7 @@ local function summaryText(d)
 		end
 	else
 		text = (L["Auxilio a <%s> en %s terminado: abatieron a %d de <%s>; acudieron %d jugadores de %d hermandades."]):format(
-			d.guild, d.zone, d.kills or 0, d.enemy or "?", d.goers or 0, d.guilds or 0)
+			d.guild, d.zone, d.kills or 0, ns.AidEnemyName(d.enemy), d.goers or 0, d.guilds or 0)
 	end
 	return text
 end
