@@ -35,7 +35,7 @@ function Hunt:OnEnable()
 	honorPatterns = self:BuildHonorPatterns()
 	ns.RegisterEvent(self, "NAME_PLATE_UNIT_ADDED", function(_, unit) self:CacheUnit(unit) end)
 	ns.RegisterEvent(self, "UPDATE_MOUSEOVER_UNIT", function() self:CacheUnit("mouseover") end)
-	ns.RegisterEvent(self, "PLAYER_TARGET_CHANGED", function() self:CacheUnit("target") end)
+	ns.RegisterEvent(self, "PLAYER_TARGET_CHANGED", function() self:CacheUnit("target"); self:NoteEnemy("target") end)
 	self.hasCombatLog = ns.RegisterEvent(self, "COMBAT_LOG_EVENT_UNFILTERED")
 	ns.RegisterEvent(self, "CHAT_MSG_COMBAT_HONOR_GAIN")
 	ns.RegisterEvent(self, "PLAYER_DEAD")
@@ -50,24 +50,29 @@ function Hunt:OnEnable()
 			pcall(self.healthWatch.RegisterUnitEvent, self.healthWatch, "UNIT_HEALTH", "target", "focus")
 			pcall(self.mouseWatch.RegisterUnitEvent, self.mouseWatch, "UNIT_HEALTH", "mouseover")
 		end
-		self.healthWatch:SetScript("OnEvent", function(_, _, unit) self:NoteDeadEnemy(unit) end)
-		self.mouseWatch:SetScript("OnEvent", function(_, _, unit) self:NoteDeadEnemy(unit) end)
+		self.healthWatch:SetScript("OnEvent", function(_, _, unit) self:NoteEnemy(unit) end)
+		self.mouseWatch:SetScript("OnEvent", function(_, _, unit) self:NoteEnemy(unit) end)
 	end
 end
 
--- ¿Es un jugador enemigo muerto? Entonces se guarda como posible víctima (unos segundos).
-local lastDeadEnemy
-function Hunt:NoteDeadEnemy(unit)
+-- En Forever, al morir el enemigo el objetivo se vacía y no llega su muerte: se apunta el último
+-- jugador enemigo con el que se luchaba (objetivo, foco o ratón, cada vez que cambia su vida o
+-- se selecciona). Si en unos segundos llega el honor, la baja es suya.
+local VICTIM_WINDOW = 15
+local lastDeadEnemy -- el último enemigo visto (de nombre histórico: antes solo se apuntaban los muertos)
+function Hunt:NoteEnemy(unit)
 	if not unit or not UnitExists(unit) or not UnitIsPlayer(unit) then return end
 	if UnitIsFriend and UnitIsFriend("player", unit) then return end
-	if not (UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit)) then return end
 	local ok, guid = pcall(UnitGUID, unit)
 	if not ok or (issecretvalue and issecretvalue(guid)) then guid = nil end
 	local name = ns.UnitFullName(unit)
 	if not guid and not name then return end
 	if guid then self:CacheUnit(unit) end
-	lastDeadEnemy = { guid = guid, name = name, at = GetTime() }
+	local dead = UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit)
+	if issecretvalue and issecretvalue(dead) then dead = nil end
+	lastDeadEnemy = { guid = guid, name = name, at = GetTime(), dead = dead and true or nil }
 end
+Hunt.NoteDeadEnemy = Hunt.NoteEnemy
 
 -- Cómo estaban el objetivo, el foco y el ratón (para el diagnóstico de las muertes con honor).
 function Hunt:DescribeUnitsForDiag()
@@ -79,15 +84,17 @@ function Hunt:DescribeUnitsForDiag()
 				tostring(UnitIsFriend and UnitIsFriend("player", unit)), tostring(UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit)))
 		end
 	end
-	if lastDeadEnemy then parts[#parts + 1] = ("ultimoMuerto=%s hace %.1fs"):format(lastDeadEnemy.name or "?", GetTime() - lastDeadEnemy.at) end
+	if lastDeadEnemy then parts[#parts + 1] = ("ultimoEnemigo=%s hace %.1fs%s"):format(lastDeadEnemy.name or "?", GetTime() - lastDeadEnemy.at, lastDeadEnemy.dead and " (muerto)" or "") end
 	return #parts > 0 and table.concat(parts, " | ") or "nada a la vista"
 end
 
 -- La víctima más probable de una muerte con honor que llega sin nombre: un enemigo muerto
--- ahora mismo a la vista o el último que vimos morir hace menos de 10 segundos.
+-- ahora mismo a la vista o, si no, el último enemigo con el que se luchaba hace poco.
 function Hunt:RecentVictim()
-	for _, unit in ipairs({ "target", "focus", "mouseover" }) do self:NoteDeadEnemy(unit) end
-	if lastDeadEnemy and GetTime() - lastDeadEnemy.at <= 10 then
+	for _, unit in ipairs({ "target", "focus", "mouseover" }) do
+		if UnitExists(unit) and UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit) then self:NoteEnemy(unit) end
+	end
+	if lastDeadEnemy and GetTime() - lastDeadEnemy.at <= VICTIM_WINDOW then
 		local v = lastDeadEnemy
 		lastDeadEnemy = nil
 		return v

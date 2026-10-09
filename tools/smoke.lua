@@ -1526,6 +1526,20 @@ do
 	local gnomo
 	for id, k in pairs(g.kills) do if k.victimName == "Gnomo Valiente" then gnomo = k; g.kills[id] = nil end end
 	assert(gnomo and gnomo.honorable and gnomo.honor == 6, "baja atribuida al objetivo enemigo muerto")
+	-- Como en Forever: se lucha con un enemigo vivo, al morir el objetivo se vacía y después llega el honor.
+	UnitExists = function(u) return u == "target" end
+	UnitIsPlayer = function() return true end
+	UnitIsFriend = function() return false end
+	UnitIsDeadOrGhost = function() return false end
+	UnitGUID = function(u) return u == "target" and "Player-4613-0000BBBB" or savedU[5](u) end
+	ns.UnitFullName = function(u) return u == "target" and "Enano Tozudo" or savedU[6](u) end
+	Hunt:NoteEnemy("target")
+	UnitExists = function() return false end
+	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Has recibido 4 p. de honor.")
+	UnitExists, UnitIsPlayer, UnitIsFriend, UnitIsDeadOrGhost, UnitGUID, ns.UnitFullName = savedU[1], savedU[2], savedU[3], savedU[4], savedU[5], savedU[6]
+	local enano
+	for id, k in pairs(g.kills) do if k.victimName == "Enano Tozudo" then enano = k; g.kills[id] = nil end end
+	assert(enano and enano.honor == 4, "baja atribuida al último enemigo con el que se luchaba")
 	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Un formato que nadie conoce")
 	assert(LG.db.global.diag.honorMsgs and LG.db.global.diag.honorMsgs[1].text == "Un formato que nadie conoce", "el desconocido se guarda")
 	g.kills[found.id] = nil
