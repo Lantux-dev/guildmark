@@ -1535,3 +1535,4 @@ L["Cuesta %d insignias (tienes %d libres)."] = "Costs %d badges (you have %d fre
 L["Cambiar el icono de la tribu cuesta %d insignias (tienes %d libres)."] = "Changing the tribe icon costs %d badges (you have %d free)."
 L["Pagar %d"] = "Pay %d"
 L["sin hermandad"] = "no guild"
+L["gremio"] = "crafters"

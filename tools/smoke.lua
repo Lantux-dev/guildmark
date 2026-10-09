@@ -373,6 +373,21 @@ end
 LG.db.profile.testMode, LG.db.profile.debug, LG.db.char.consent = true, false, "yes"; LG.db.profile.testRank = nil
 print_("OK clics sin errores:", clicks)
 
+-- Inicio con un encargo tuyo abierto al gremio (aún sin artesano).
+do
+	ns.CreateOrder(nil, 2331, 1, nil, 171)
+	local gid
+	for id, o in pairs(g.orders) do if o.guild and o.status == "open" and not o.crafter then gid = id end end
+	assert(gid, "encargo al gremio sin artesano")
+	local listed
+	for _, o in ipairs(ns.OrdersByRole().mine) do if o.id == gid then listed = true end end
+	assert(listed, "el encargo sale entre los tuyos")
+	if not LantuxGuildFrame:IsShown() then ns.ToggleMainFrame() end
+	ns.SelectTab("home")
+	g.orders[gid] = nil
+	print_("OK inicio con encargo al gremio sin artesano")
+end
+
 -- Cada apartado de cada sección (los clics de arriba casi nunca llegan: los botones de
 -- navegación cambian de sección antes), pintado y con sus botones pulsados.
 do

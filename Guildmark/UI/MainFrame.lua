@@ -217,7 +217,7 @@ local function orderLine(rows, o)
 	local s = STATUS[o.status] or { GREY, o.status }
 	local icon, color = recipeIcon(o.recipe, o.item)
 	line(rows, ("%s  %dx %s  %s  %s%s|r"):format(grey(date("%d/%m", o.t)), o.qty or 1, ns.RecipeName(o.recipe) or "?",
-		grey(("%s > %s"):format(ns.ShortName(o.requester), ns.ShortName(o.crafter))), s[1], s[2]), 1, { icon = icon, iconColor = color })
+		grey(("%s > %s"):format(ns.ShortName(o.requester) or "?", o.crafter and ns.ShortName(o.crafter) or L["gremio"])), s[1], s[2]), 1, { icon = icon, iconColor = color })
 end
 
 local function orderButtons(o, me)
@@ -464,7 +464,8 @@ views.home = function()
 		if o.status == "open" or o.status == "accepted" then pending[#pending + 1] = { o = o, who = L["de"] .. " " .. ns.ShortName(o.requester) } end
 	end
 	for _, o in ipairs(roles.mine) do
-		if o.status == "open" or o.status == "accepted" then pending[#pending + 1] = { o = o, who = L["a"] .. " " .. ns.ShortName(o.crafter) } end
+		if o.status == "open" or o.status == "accepted" then pending[#pending + 1] = { o = o, who = o.crafter and (L["a"] .. " " .. ns.ShortName(o.crafter))
+			or grey(L["esperando a que alguien del gremio lo acepte"]) } end
 	end
 	if #pending > 0 then
 		space(rows)
