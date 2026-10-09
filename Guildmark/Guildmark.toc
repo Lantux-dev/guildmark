@@ -6,7 +6,7 @@
 ## Author: Lantux
 ## X-License: GPL-3.0
 ## X-Donate: https://ko-fi.com/lantux
-## Version: 0.9.0
+## Version: 0.9.1
 ## SavedVariables: GuildmarkDB
 ## SavedVariablesPerCharacter: GuildmarkBackup
 ## IconTexture: Interface\AddOns\Guildmark\Media\emblem_small

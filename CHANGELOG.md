@@ -1,5 +1,13 @@
 # Cambios · Changelog
 
+## 0.9.1 (beta) · 2026-10
+
+- Arreglado: la ventana daba un error al abrirse si tenías un encargo al gremio que aún no había aceptado nadie.
+
+---
+
+- Fixed: the window threw an error on opening if you had a guild-wide order nobody had accepted yet.
+
 ## 0.9.0 (beta) · 2026-10
 
 Primera versión pública, en beta: casi todo está probado en la beta de WoW Forever, pero
