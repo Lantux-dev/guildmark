@@ -107,6 +107,11 @@ Todos los comandos tienen su equivalente en inglés (`profile`, `privacy`, `sett
 Desde **CurseForge** (recomendado) o a mano: descomprime la carpeta `Guildmark` en
 `World of Warcraft\<versión>\Interface\AddOns\`.
 
+## Apoyar el proyecto
+
+Guildmark es y seguirá siendo gratis y completo. Si te gusta y quieres invitarme a un café:
+[ko-fi.com/lantux](https://ko-fi.com/lantux).
+
 ## Licencia
 
 Código bajo **GPL-3.0** (ver [`LICENSE`](LICENSE)). El nombre, el logo y el arte propio
@@ -217,6 +222,11 @@ Guild bank activity is only recorded for those who have accepted.
 
 From **CurseForge** (recommended) or manually: unzip the `Guildmark` folder into
 `World of Warcraft\<version>\Interface\AddOns\`.
+
+## Support the project
+
+Guildmark is and will stay free and complete. If you enjoy it and want to buy me a coffee:
+[ko-fi.com/lantux](https://ko-fi.com/lantux).
 
 ## License
 

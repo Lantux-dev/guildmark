@@ -144,6 +144,9 @@ No se comparte nada hasta que aceptas. `/gmk privacidad` te enseña qué se comp
 
 Cuanta más gente de tu hermandad use Guildmark, más cosas muestra.
 
+## Apoyar el proyecto
+Guildmark es gratis y completo, sin nada de pago. Si te gusta y quieres invitarme a un café: [ko-fi.com/lantux](https://ko-fi.com/lantux) ☕
+
 ---
 
 Code: GPL-3.0. The Guildmark name, logo and art are reserved. · Código: GPL-3.0. El nombre, el logo y el arte de Guildmark están reservados.

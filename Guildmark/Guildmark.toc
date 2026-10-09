@@ -5,6 +5,7 @@
 ## Notes-enUS: A living guild: events, a badge economy (auctions, chest, shop), hunting and faction assaults, tribes, a profile with medals and guild achievements.
 ## Author: Lantux
 ## X-License: GPL-3.0
+## X-Donate: https://ko-fi.com/lantux
 ## Version: 0.9.0
 ## SavedVariables: GuildmarkDB
 ## SavedVariablesPerCharacter: GuildmarkBackup
