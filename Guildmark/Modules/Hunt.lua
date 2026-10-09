@@ -21,7 +21,7 @@ local REACTION_HOSTILE = COMBATLOG_OBJECT_REACTION_HOSTILE or 0x40
 
 local REVENGE_WINDOW = 600     -- segundos para que una kill cuente como venganza
 local ATTACKER_WINDOW = 10     -- segundos: último golpe de un jugador antes de morir
-local HONOR_WAIT = 2           -- espera al mensaje de muerte honorable antes de publicar
+local HONOR_WAIT = 3           -- espera al mensaje de muerte honorable antes de publicar
 local CACHE_REFRESH = 86400    -- se vuelve a compartir una entrada si tiene más de un día
 local CACHE_SHARE_EVERY = 60
 
@@ -39,6 +39,9 @@ function Hunt:OnEnable()
 	self.hasCombatLog = ns.RegisterEvent(self, "COMBAT_LOG_EVENT_UNFILTERED")
 	ns.RegisterEvent(self, "CHAT_MSG_COMBAT_HONOR_GAIN")
 	ns.RegisterEvent(self, "PLAYER_DEAD")
+	-- Golpe de gracia (tuyo o de tu grupo): llega aunque el registro de combate esté prohibido.
+	pcall(ns.RegisterEvent, self, "PARTY_KILL", function(_, a1, a2) self:OnPartyKill(a1, a2) end)
+	self.lastKB = self:KillingBlows()
 	self:ScheduleRepeatingTimer("ShareCache", CACHE_SHARE_EVERY)
 	-- En Forever la muerte con honor llega como «Has recibido N p. de honor.», sin la víctima:
 	-- se apunta qué jugador enemigo acaba de morir a la vista para atribuírsela.
@@ -100,6 +103,100 @@ function Hunt:RecentVictim()
 		return v
 	end
 	return nil
+end
+
+---------------------------------------------------------------------------
+-- Golpes de gracia (PARTY_KILL) y reparto del honor
+--
+-- En Forever la muerte con honor llega sin víctima («Has recibido N p. de honor») y ese
+-- mismo mensaje lo recibe quien está cerca cuando mata alguien de su grupo. PARTY_KILL
+-- dice quién remató a quién (como hace Overlord Forever): si fuiste tú, la baja es tuya
+-- con nombre; si fue un compañero, el honor que llega es compartido y no es baja tuya.
+---------------------------------------------------------------------------
+
+local SHARED_WINDOW = 4    -- el honor que llega tras la baja de un compañero, compartido
+local DEDUP_WINDOW = 60    -- nadie muere dos veces en un minuto: no se repite la misma víctima
+local partyKillWorks       -- PARTY_KILL ha llegado alguna vez en esta sesión
+local groupKillAt = -100   -- último golpe de gracia de un compañero
+local credited = {}        -- [GUID o nombre] = GetTime() de la última baja apuntada
+
+-- Valor usable (no secreto ni inaccesible) o nil.
+local function usable(v)
+	if v == nil then return nil end
+	if issecretvalue and issecretvalue(v) then return nil end
+	if canaccessvalue and not canaccessvalue(v) then return nil end
+	return v
+end
+
+-- Golpes de gracia totales (criterio del logro 1487 de Blizzard), para confirmar los propios.
+function Hunt:KillingBlows()
+	if not (C_AchievementInfo and C_AchievementInfo.GetCriteriaInfo) then return nil end
+	local ok, info = pcall(C_AchievementInfo.GetCriteriaInfo, 1487, 1)
+	local n = ok and type(info) == "table" and usable(info.quantity or info.quantityNumber) or nil
+	return tonumber(n)
+end
+
+function Hunt:WasCredited(guid, name)
+	local key = guid or name
+	return key ~= nil and credited[key] ~= nil and GetTime() - credited[key] < DEDUP_WINDOW
+end
+function Hunt:MarkCredited(guid, name)
+	local key = guid or name
+	if key then credited[key] = GetTime() end
+end
+
+-- PARTY_KILL: (GUID del que remata, GUID de la víctima) o, en el formato antiguo, la unidad de la víctima.
+function Hunt:OnPartyKill(a1, a2)
+	partyKillWorks = true
+	local s1, s2 = usable(a1), usable(a2)
+	local attacker, victim, victimName
+	if type(s1) == "string" and s1:find("^%a+%-") then
+		attacker, victim = s1, type(s2) == "string" and s2 or nil
+	elseif a1 ~= nil and s1 == nil then
+		victim = type(s2) == "string" and s2 or nil -- el que remata llega protegido
+	elseif type(s1) == "string" and UnitExists(s1) then
+		local ok, guid = pcall(UnitGUID, s1)
+		victim = ok and usable(guid) or nil
+		victimName = ns.UnitFullName(s1)
+	end
+	if victim and not victim:find("^Player%-") then return end -- solo jugadores
+	if not victim and not victimName then return end
+	-- ¿Lo remataste tú? Por el GUID o, si no se sabe, porque subió tu contador de golpes de gracia.
+	local mine
+	if attacker then
+		mine = attacker == myGUID
+	else
+		local kb = self:KillingBlows()
+		mine = kb ~= nil and self.lastKB ~= nil and kb > self.lastKB
+		if kb then self.lastKB = kb end
+	end
+	if not mine then
+		groupKillAt = GetTime()
+		return
+	end
+	if self:WasCredited(victim, victimName) then return end
+	if not victimName and victim then
+		if UnitNameFromGUID then
+			local ok, n = pcall(UnitNameFromGUID, victim)
+			n = ok and usable(n) or nil
+			if type(n) == "string" and n ~= "" and n ~= UNKNOWNOBJECT then victimName = n end
+		end
+		local g = LG:GuildData()
+		local c = g and g.guildCache[victim]
+		victimName = victimName or (c and c.n)
+	end
+	self:MarkCredited(victim, victimName)
+	-- Sin honor todavía: queda pendiente unos segundos por si llega «Has recibido N p. de honor».
+	self:OnKill(victim, victimName, nil)
+end
+
+-- La baja propia que espera su honor (la más reciente), o nil.
+local function pendingOwnKill()
+	local best
+	for _, rec in pairs(pendingKills) do
+		if not best or rec.t > best.t then best = rec end
+	end
+	return best
 end
 
 ---------------------------------------------------------------------------
@@ -476,12 +573,25 @@ function Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(_, text)
 		local awarded = text:match(toPattern(COMBATLOG_HONORAWARD))
 		if awarded then
 			local seen = self:DescribeUnitsForDiag()
-			local v = self:RecentVictim()
+			local own = pendingOwnKill()
+			if own then
+				own.honorable, own.honor = true, tonumber(awarded) or 0
+				seen = seen .. " | golpe de gracia propio"
+			end
+			local shared = not own and GetTime() - groupKillAt <= SHARED_WINDOW
+			if shared then seen = seen .. " | honor compartido (baja de un compañero)" end
+			local v = not own and not shared and self:RecentVictim() or nil
+			if v and self:WasCredited(v.guid, v.name) then
+				seen = seen .. " | ya contada: " .. (v.name or "?")
+				v = nil
+			end
+			if v then self:MarkCredited(v.guid, v.name) end
 			-- Diagnóstico (global.diag.honorAwards, los 5 últimos): qué había a la vista y a quién se atribuyó.
 			local diag = LG.db.global.diag
 			diag.honorAwards = diag.honorAwards or {}
 			table.insert(diag.honorAwards, 1, { t = date("%Y-%m-%d %H:%M:%S"), honor = tonumber(awarded), seen = seen,
-				victim = v and (v.name or v.guid) or nil, combatLog = self.hasCombatLog and true or nil })
+				victim = v and (v.name or v.guid) or (own and own.victimName) or nil, combatLog = self.hasCombatLog and true or nil,
+				partyKill = partyKillWorks and true or false })
 			for i = #diag.honorAwards, 6, -1 do diag.honorAwards[i] = nil end
 			if v and not self.hasCombatLog then self:OnKill(v.guid, v.name, tonumber(awarded) or 0) end
 			return

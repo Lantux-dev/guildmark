@@ -1540,6 +1540,35 @@ do
 	local enano
 	for id, k in pairs(g.kills) do if k.victimName == "Enano Tozudo" then enano = k; g.kills[id] = nil end end
 	assert(enano and enano.honor == 4, "baja atribuida al último enemigo con el que se luchaba")
+	-- Golpe de gracia (PARTY_KILL): el tuyo da la baja con nombre y el honor que llega es suyo;
+	-- el de un compañero no es baja tuya aunque te llegue honor; la misma víctima no se repite.
+	local myG = UnitGUID("player")
+	local timers, savedST = {}, Hunt.ScheduleTimer
+	Hunt.ScheduleTimer = function(_, fn) if type(fn) == "function" then timers[#timers + 1] = fn end return 1 end
+	local function flushTimers() local list = timers; timers = {}; for _, fn in ipairs(list) do fn() end end
+	local savedNFG = UnitNameFromGUID
+	UnitNameFromGUID = function(guid) return guid == "Player-4613-0000CCCC" and "Elfa Veloz" or nil end
+	Hunt:OnPartyKill(myG, "Player-4613-0000CCCC")
+	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Has recibido 7 p. de honor.")
+	NOW = NOW + 5
+	flushTimers()
+	local elfa
+	for id, k in pairs(g.kills) do if k.victimName == "Elfa Veloz" then elfa = k; g.kills[id] = nil end end
+	assert(elfa and elfa.honorable and elfa.honor == 7, "golpe de gracia propio: baja con nombre y honor")
+	local before2 = 0
+	for _ in pairs(g.kills) do before2 = before2 + 1 end
+	Hunt:OnPartyKill("Player-4613-0000DDDD", "Player-4613-0000EEEE")
+	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Has recibido 10 p. de honor.")
+	local after2 = 0
+	for _ in pairs(g.kills) do after2 = after2 + 1 end
+	assert(after2 == before2, "honor compartido por la baja de un compañero: no es baja tuya")
+	Hunt:OnPartyKill(myG, "Player-4613-0000CCCC")
+	flushTimers()
+	local again = 0
+	for _, k in pairs(g.kills) do if k.victimName == "Elfa Veloz" then again = again + 1 end end
+	assert(again == 0, "la misma víctima no se repite en un minuto")
+	UnitNameFromGUID = savedNFG
+	Hunt.ScheduleTimer = savedST
 	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Un formato que nadie conoce")
 	assert(LG.db.global.diag.honorMsgs and LG.db.global.diag.honorMsgs[1].text == "Un formato que nadie conoce", "el desconocido se guarda")
 	g.kills[found.id] = nil
