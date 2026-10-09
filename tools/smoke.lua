@@ -1613,6 +1613,23 @@ do
 	print_("OK auxilio contra jugadores sin hermandad")
 end
 
+-- Asaltos desde la Alianza: sus capitales enemigas son las de la Horda (y al revés).
+do
+	local savedUFG = UnitFactionGroup
+	UnitFactionGroup = function() return "Alliance", "Alianza" end
+	local keys = {}
+	for _, c in ipairs(ns.EnemyCities()) do keys[#keys + 1] = c.key end
+	table.sort(keys)
+	assert(table.concat(keys, ",") == "orgrimmar,thunderbluff,undercity", "la Alianza asalta Orgrimmar, Entrañas y Cima del Trueno: " .. table.concat(keys, ","))
+	UnitFactionGroup = function() return "Horde", "Horda" end
+	keys = {}
+	for _, c in ipairs(ns.EnemyCities()) do keys[#keys + 1] = c.key end
+	table.sort(keys)
+	assert(table.concat(keys, ",") == "darnassus,ironforge,stormwind", "la Horda asalta Ventormenta, Forjaz y Darnassus")
+	UnitFactionGroup = savedUFG
+	print_("OK capitales enemigas según la facción")
+end
+
 -- Campos de batalla: las muertes no piden auxilio ni crean objetivos; el resultado se registra y da insignias.
 do
 	local shown = {}
