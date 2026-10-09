@@ -46,6 +46,8 @@ ChatTypeInfo = { RAID_WARNING = {} }
 RAID_CLASS_COLORS = setmetatable({}, { __index = function() return { colorStr = "ffffffff" } end })
 COMBATLOG_HONORGAIN = "%s muere (muerte con honor: %s). Obtienes %d p. de honor."
 COMBATLOG_HONORGAIN_NO_RANK = "%s muere (muerte con honor). Obtienes %d p. de honor."
+COMBATLOG_HONORAWARD = "Has recibido %d p. de honor."
+GetPlayerInfoByGUID = GetPlayerInfoByGUID or function() return nil end
 COMBATLOG_HONORGAIN_NO_RANK_EXHAUSTION1 = "%s muere (muerte con honor). Obtienes %d p. de honor (%s %s de bonificación)."
 ITEM_CREATED_BY = "|cff00ff00<Hecho por %s>|r"
 UNKNOWNOBJECT, CANCEL, OKAY, ERR_TRADE_COMPLETE = "Entidad desconocida", "Cancelar", "Aceptar", "Intercambio completado"
@@ -1506,6 +1508,24 @@ do
 	end
 	assert(rangoso and rangoso.honor == 45, "con rango: honor 45, no el rango")
 	assert(bonus and bonus.honor == 20, "con bonificación: honor 20")
+	-- Forever: «Has recibido N p. de honor.» sin víctima. Sin nadie muerto a la vista, no es una baja;
+	-- con el objetivo enemigo muerto, la baja es suya.
+	local savedU = { UnitExists, UnitIsPlayer, UnitIsFriend, UnitIsDeadOrGhost, UnitGUID, ns.UnitFullName }
+	local count = function() local n = 0 for _ in pairs(g.kills) do n = n + 1 end return n end
+	local n0 = count()
+	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Has recibido 6 p. de honor.")
+	assert(count() == n0, "honor sin nadie muerto a la vista: no es una baja")
+	UnitExists = function(u) return u == "target" end
+	UnitIsPlayer = function() return true end
+	UnitIsFriend = function() return false end
+	UnitIsDeadOrGhost = function(u) return u == "target" end
+	UnitGUID = function(u) return u == "target" and "Player-4613-0000AAAA" or savedU[5](u) end
+	ns.UnitFullName = function(u) return u == "target" and "Gnomo Valiente" or savedU[6](u) end
+	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Has recibido 6 p. de honor.")
+	UnitExists, UnitIsPlayer, UnitIsFriend, UnitIsDeadOrGhost, UnitGUID, ns.UnitFullName = savedU[1], savedU[2], savedU[3], savedU[4], savedU[5], savedU[6]
+	local gnomo
+	for id, k in pairs(g.kills) do if k.victimName == "Gnomo Valiente" then gnomo = k; g.kills[id] = nil end end
+	assert(gnomo and gnomo.honorable and gnomo.honor == 6, "baja atribuida al objetivo enemigo muerto")
 	Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(nil, "Un formato que nadie conoce")
 	assert(LG.db.global.diag.honorMsgs and LG.db.global.diag.honorMsgs[1].text == "Un formato que nadie conoce", "el desconocido se guarda")
 	g.kills[found.id] = nil

@@ -330,7 +330,18 @@ local function collectEntries(g)
 		end
 	end
 
-	table.sort(entries, function(a, b) return a.t < b.t end)
+	-- Orden fijo también en los empates del mismo segundo: cada addon recorre sus datos en un
+	-- orden distinto y, si no, una compra o un precio podría aplicarse antes o después de un
+	-- ingreso del mismo instante y dar saldos distintos en cada jugador.
+	local function key(e)
+		return ("%s|%s|%s|%s|%d|%d"):format(e.member or "", e.special or e.cat or "", tostring(e.reason or ""),
+			tostring(e.donation or e.bounty or e.death or e.kill or e.item or ""), e.merits or 0, e.amount or 0)
+	end
+	for _, e in ipairs(entries) do e.sortKey = key(e) end
+	table.sort(entries, function(a, b)
+		if a.t ~= b.t then return a.t < b.t end
+		return a.sortKey < b.sortKey
+	end)
 	return entries
 end
 

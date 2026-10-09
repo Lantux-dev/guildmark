@@ -40,6 +40,41 @@ function Hunt:OnEnable()
 	ns.RegisterEvent(self, "CHAT_MSG_COMBAT_HONOR_GAIN")
 	ns.RegisterEvent(self, "PLAYER_DEAD")
 	self:ScheduleRepeatingTimer("ShareCache", CACHE_SHARE_EVERY)
+	-- En Forever la muerte con honor llega como «Has recibido N p. de honor.», sin la víctima:
+	-- se apunta qué jugador enemigo acaba de morir a la vista para atribuírsela.
+	if not self.healthWatch and CreateFrame then
+		self.healthWatch = CreateFrame("Frame")
+		if self.healthWatch.RegisterUnitEvent then
+			pcall(self.healthWatch.RegisterUnitEvent, self.healthWatch, "UNIT_HEALTH", "target", "focus", "mouseover")
+		end
+		self.healthWatch:SetScript("OnEvent", function(_, _, unit) self:NoteDeadEnemy(unit) end)
+	end
+end
+
+-- ¿Es un jugador enemigo muerto? Entonces se guarda como posible víctima (unos segundos).
+local lastDeadEnemy
+function Hunt:NoteDeadEnemy(unit)
+	if not unit or not UnitExists(unit) or not UnitIsPlayer(unit) then return end
+	if UnitIsFriend and UnitIsFriend("player", unit) then return end
+	if not (UnitIsDeadOrGhost and UnitIsDeadOrGhost(unit)) then return end
+	local ok, guid = pcall(UnitGUID, unit)
+	if not ok or (issecretvalue and issecretvalue(guid)) then guid = nil end
+	local name = ns.UnitFullName(unit)
+	if not guid and not name then return end
+	if guid then self:CacheUnit(unit) end
+	lastDeadEnemy = { guid = guid, name = name, at = GetTime() }
+end
+
+-- La víctima más probable de una muerte con honor que llega sin nombre: un enemigo muerto
+-- ahora mismo a la vista o el último que vimos morir hace menos de 10 segundos.
+function Hunt:RecentVictim()
+	for _, unit in ipairs({ "target", "focus", "mouseover" }) do self:NoteDeadEnemy(unit) end
+	if lastDeadEnemy and GetTime() - lastDeadEnemy.at <= 10 then
+		local v = lastDeadEnemy
+		lastDeadEnemy = nil
+		return v
+	end
+	return nil
 end
 
 ---------------------------------------------------------------------------
@@ -408,6 +443,16 @@ function Hunt:CHAT_MSG_COMBAT_HONOR_GAIN(_, text)
 			name = captures[1]
 			honor = hp.honorIndex and tonumber(captures[hp.honorIndex]) or nil
 			break
+		end
+	end
+	if not name and COMBATLOG_HONORAWARD then
+		-- «Has recibido N p. de honor.»: sin víctima. Solo cuenta si acaba de morir un enemigo a la
+		-- vista (si no, es honor de una misión o de un objetivo de campo de batalla).
+		local awarded = text:match(toPattern(COMBATLOG_HONORAWARD))
+		if awarded then
+			local v = self:RecentVictim()
+			if v and not self.hasCombatLog then self:OnKill(v.guid, v.name, tonumber(awarded) or 0) end
+			return
 		end
 	end
 	if not name then
