@@ -1,0 +1,66 @@
+## Interface: 16001
+## Title: Guildmark
+## Notes: Hermandad viva: eventos, economía de insignias (subastas, cofre, tienda), caza y asaltos de facción, tribus, perfil con medallas y logros de hermandad.
+## Notes-esES: Hermandad viva: eventos, economía de insignias (subastas, cofre, tienda), caza y asaltos de facción, tribus, perfil con medallas y logros de hermandad.
+## Notes-enUS: A living guild: events, a badge economy (auctions, chest, shop), hunting and faction assaults, tribes, a profile with medals and guild achievements.
+## Author: Lantux
+## X-License: GPL-3.0
+## Version: 0.9.0
+## SavedVariables: GuildmarkDB
+## SavedVariablesPerCharacter: GuildmarkBackup
+## IconTexture: Interface\AddOns\Guildmark\Media\emblem_small
+
+embeds.xml
+
+Locale.lua
+Locales\enUS.lua
+Backup.lua
+Core.lua
+Comm.lua
+
+Modules\Roster.lua
+Modules\PvP.lua
+Modules\Dungeon.lua
+Modules\Hunt.lua
+Modules\Professions.lua
+Modules\Orders.lua
+Modules\Gathering.lua
+Modules\Events.lua
+Modules\Merits.lua
+Modules\Auction.lua
+Modules\Chest.lua
+Modules\Profile.lua
+Modules\Bounty.lua
+Modules\Shop.lua
+Modules\GuildBank.lua
+Modules\Achievements.lua
+Modules\Legacy.lua
+Modules\Integrity.lua
+Modules\Network.lua
+Modules\Bridge.lua
+Modules\Wars.lua
+Modules\Layer.lua
+Modules\Aid.lua
+Modules\Faction.lua
+Modules\LFG.lua
+Modules\Tribes.lua
+Modules\Activity.lua
+Modules\TestData.lua
+Modules\Export.lua
+
+UI\Minimap.lua
+UI\InputDialog.lua
+UI\IconPicker.lua
+UI\MainFrame.lua
+UI\Consent.lua
+UI\OrderDialog.lua
+UI\EventDialog.lua
+UI\AuctionFrame.lua
+UI\AchievementsFrame.lua
+UI\CallToArms.lua
+UI\WarMap.lua
+UI\WarHud.lua
+UI\Banner.lua
+UI\Profile.lua
+
+API.lua

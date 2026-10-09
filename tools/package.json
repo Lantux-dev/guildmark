@@ -1,0 +1,16 @@
+{
+  "name": "lantux-guild-tools",
+  "private": true,
+  "description": "Comprobaciones del addon fuera del juego: sintaxis Lua 5.1 y prueba de humo con una imitación de la API de WoW.",
+  "scripts": {
+    "check": "node check.js",
+    "smoke": "node smoke.js",
+    "locale": "node locale.js",
+    "smoke:en": "node -e \"process.env.SMOKE_LOCALE='enUS';require('./smoke.js')\"",
+    "test": "node check.js && node locale.js && node smoke.js && npm run smoke:en"
+  },
+  "devDependencies": {
+    "fengari": "0.1.4",
+    "luaparse": "0.3.1"
+  }
+}

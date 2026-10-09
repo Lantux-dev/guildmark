@@ -1,0 +1,12 @@
+# Configuración de BigWigs packager para publicar en CurseForge y Wago.
+# Las librerías van incluidas en Guildmark/Libs, así que no hay externals.
+package-as: Guildmark
+
+move-folders:
+  Guildmark: Guildmark
+
+ignore:
+  - scripts
+  - tools
+  - docs
+  - README.md
