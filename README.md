@@ -104,7 +104,7 @@ Todos los comandos tienen su equivalente en inglés (`profile`, `privacy`, `sett
 
 ## Instalar
 
-Desde **CurseForge** (recomendado) o a mano: descomprime la carpeta `Guildmark` en
+Desde [**CurseForge**](https://www.curseforge.com/wow/addons/guildmark) (recomendado) o a mano: descomprime la carpeta `Guildmark` en
 `World of Warcraft\<versión>\Interface\AddOns\`.
 
 ## Apoyar el proyecto
@@ -220,7 +220,7 @@ Guild bank activity is only recorded for those who have accepted.
 
 ## Install
 
-From **CurseForge** (recommended) or manually: unzip the `Guildmark` folder into
+From [**CurseForge**](https://www.curseforge.com/wow/addons/guildmark) (recommended) or manually: unzip the `Guildmark` folder into
 `World of Warcraft\<version>\Interface\AddOns\`.
 
 ## Support the project
