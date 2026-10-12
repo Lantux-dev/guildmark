@@ -36,7 +36,9 @@ function Hunt:OnEnable()
 	ns.RegisterEvent(self, "NAME_PLATE_UNIT_ADDED", function(_, unit) self:CacheUnit(unit) end)
 	ns.RegisterEvent(self, "UPDATE_MOUSEOVER_UNIT", function() self:CacheUnit("mouseover") end)
 	ns.RegisterEvent(self, "PLAYER_TARGET_CHANGED", function() self:CacheUnit("target"); self:NoteEnemy("target") end)
-	self.hasCombatLog = ns.RegisterEvent(self, "COMBAT_LOG_EVENT_UNFILTERED")
+	-- En Forever el registro de combate está prohibido para los addons: ni se intenta registrar,
+	-- porque el intento hace saltar el aviso de Blizzard de «acción bloqueada».
+	self.hasCombatLog = not self:CombatLogRestricted() and ns.RegisterEvent(self, "COMBAT_LOG_EVENT_UNFILTERED") or false
 	ns.RegisterEvent(self, "CHAT_MSG_COMBAT_HONOR_GAIN")
 	ns.RegisterEvent(self, "PLAYER_DEAD")
 	-- Golpe de gracia (tuyo o de tu grupo): llega aunque el registro de combate esté prohibido.
@@ -276,6 +278,13 @@ end
 -- ¿Cuenta para la caza (objetivos, venganzas, auxilio, «Nos cazan»)? Todo lo que no sea de un campo de batalla.
 function ns.IsHuntRecord(k)
 	return not k.bg
+end
+
+function Hunt:CombatLogRestricted()
+	if not (C_CombatLog and C_CombatLog.IsCombatLogRestricted) then return false end
+	local ok, restricted = pcall(C_CombatLog.IsCombatLogRestricted)
+	if not ok or (issecretvalue and issecretvalue(restricted)) then return true end
+	return restricted and true or false
 end
 
 function Hunt:COMBAT_LOG_EVENT_UNFILTERED()

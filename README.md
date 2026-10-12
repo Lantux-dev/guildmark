@@ -99,6 +99,7 @@ de la hermandad solo se apuntan los movimientos de quien ha aceptado.
 | `/gmk privacidad` | Qué se comparte y el permiso |
 | `/gmk borrar` | Borrar tus datos |
 | `/gmk prueba` | Modo prueba: tu grupo hace de hermandad, para probarlo sin tocar tu hermandad real |
+| `/gmk errores` | Ver y copiar los errores del addon, para avisar de un fallo |
 
 Todos los comandos tienen su equivalente en inglés (`profile`, `privacy`, `settings`, `test`…).
 
@@ -106,6 +107,11 @@ Todos los comandos tienen su equivalente en inglés (`profile`, `privacy`, `sett
 
 Desde [**CurseForge**](https://www.curseforge.com/wow/addons/guildmark) (recomendado) o a mano: descomprime la carpeta `Guildmark` en
 `World of Warcraft\<versión>\Interface\AddOns\`.
+
+## ¿Algo falla?
+
+Escribe `/gmk errores` en el juego, copia el texto y abre una
+[incidencia](https://github.com/Lantux-dev/guildmark/issues/new/choose) o déjalo en los comentarios de CurseForge.
 
 ## Apoyar el proyecto
 
@@ -217,11 +223,17 @@ Guild bank activity is only recorded for those who have accepted.
 | `/gmk privacy` | What is shared and your consent |
 | `/gmk delete` | Delete your data |
 | `/gmk test` | Test mode: your group acts as the guild, to try it without touching your real guild |
+| `/gmk errors` | View and copy the addon errors, to report a bug |
 
 ## Install
 
 From [**CurseForge**](https://www.curseforge.com/wow/addons/guildmark) (recommended) or manually: unzip the `Guildmark` folder into
 `World of Warcraft\<version>\Interface\AddOns\`.
+
+## Found a bug?
+
+Type `/gmk errors` in game, copy the text and open an
+[issue](https://github.com/Lantux-dev/guildmark/issues/new/choose) or leave it in the CurseForge comments.
 
 ## Support the project
 

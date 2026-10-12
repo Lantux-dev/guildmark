@@ -88,6 +88,7 @@ local defaults = {
 		chars = {}, -- personajes de esta cuenta, para la lista de alts
 		blocked = {}, -- diagnóstico de acciones bloqueadas por Blizzard
 		forbiddenEvents = {}, -- [evento] = fecha en que Blizzard prohibió registrarlo
+		errors = {}, -- errores de Lua del addon, para /gmk errores (Errors.lua)
 		diag = {}, -- resultados de /gmk diag y /gmk dump
 		recapDebug = {}, -- volcado del informe de muerte de las últimas muertes
 		castDebug = {},  -- últimos hechizos lanzados (solo con /gmk debug), para los ID de Forever
@@ -469,6 +470,7 @@ function LG:OnEnable()
 	-- Si los datos guardados no se cargaron (fallo de la beta), se recuperan de la copia.
 	local restored = ns.RestoreSavedVariables()
 	self.db = LibStub("AceDB-3.0"):New("GuildmarkDB", defaults, true)
+	ns.ErrorsReady()
 	if restored then
 		self:ScheduleTimer(function()
 			self:Print(L["Tus datos guardados no se cargaron bien; se han recuperado de la copia de seguridad."])
@@ -1040,6 +1042,7 @@ local HELP = {
 	L["/gmk perfil [nombre] - tu perfil (medallas, ficha e insignias del retrato) o el de otro miembro"],
 	L["/gmk red - estado de la red de hermandades"],
 	L["/gmk insignias - mostrar u ocultar las insignias sobre el marco de jugador"],
+	L["/gmk errores - ver y copiar los errores del addon para avisar de un fallo"],
 	L["/gmk debug - mensajes de depuración"],
 }
 
@@ -1048,6 +1051,7 @@ local COMMAND_ALIASES = {
 	privacy = "privacidad", settings = "ajustes", options = "ajustes", optional = "opcional", delete = "borrar", minimap = "minimapa",
 	adjust = "ajustar", challenges = "desafios", ["desafíos"] = "desafios", logros = "desafios", achievements = "desafios", auction = "subasta",
 	target = "objetivo", test = "prueba", profile = "perfil", war = "guerra", network = "red", badges = "insignias",
+	errors = "errores", error = "errores", bugs = "errores", fallos = "errores",
 }
 
 function LG:SlashCommand(input)
@@ -1137,6 +1141,9 @@ function LG:SlashCommand(input)
 		end
 		self:SendMessage("LANTUX_GUILD_CHANGED")
 		self:DataChanged()
+	elseif cmd == "errores" then
+		-- /gmk errores prueba: provoca un error a propósito, para comprobar que se registra.
+		if arg == "prueba" or arg == "test" then ns.TestError() else ns.ShowErrors() end
 	elseif cmd == "debug" then
 		self.db.profile.debug = not self.db.profile.debug
 		self:Print("debug:", self.db.profile.debug and "on" or "off")

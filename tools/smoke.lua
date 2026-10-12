@@ -151,7 +151,7 @@ local ns = {}
 -- SOURCES lo rellena smoke.js con el código de cada archivo del .toc
 for _, entry in ipairs(SOURCES) do
 	local chunk = assert(load(entry.src, "@" .. entry.name))
-	chunk("LantuxGuild", ns)
+	chunk("Guildmark", ns)
 end
 
 local LG = ns.LG
@@ -386,6 +386,35 @@ do
 	ns.SelectTab("home")
 	g.orders[gid] = nil
 	print_("OK inicio con encargo al gremio sin artesano")
+end
+
+-- Registro de errores (/gmk errores): solo los del addon, sin repetir, con tope, y el informe para copiar.
+do
+	ns.ClearErrors()
+	local ours = "Interface/AddOns/Guildmark/UI/MainFrame.lua:467: attempt to concatenate a nil value"
+	assert(not ns.RecordError("Interface/AddOns/OtroAddon/Core.lua:1: boom", "[Interface/AddOns/OtroAddon/Core.lua]:1"), "los errores de otros addons no se guardan")
+	assert(not ns.RecordError("Interface/AddOns/Guildmark_Discord/Plugin.lua:1: boom", ""), "ni los del plugin privado")
+	assert(not ns.RecordError(nil, nil) and not ns.RecordError({}, 5), "valores raros no rompen nada")
+	assert(ns.RecordError(ours, "[Interface/AddOns/Guildmark/UI/MainFrame.lua]:467: in function '?'"), "error propio guardado")
+	assert(ns.RecordError(ours, "otra pila") and ns.ErrorCount() == 1, "el mismo error no se repite")
+	assert(LG.db.global.errors[1].n == 2 and LG.db.global.errors[1].v == LG.VERSION, "cuenta las veces y la versión")
+	-- Un error de una biblioteca llamada desde el addon se reconoce por la pila.
+	assert(ns.RecordError("bad argument #1 to 'format'", "[Interface\\AddOns\\Guildmark\\Modules\\Hunt.lua]:12: in function 'x'"), "se reconoce por la pila")
+	local report = ns.ErrorReport()
+	assert(report:find(ours, 1, true) and report:find("Guildmark " .. LG.VERSION, 1, true) and report:find("x2", 1, true), "informe con versión, mensaje y veces")
+	assert(not report:find("|c", 1, true), "informe sin códigos de color")
+	for i = 1, 30 do ns.RecordError(("Interface/AddOns/Guildmark/Core.lua:%d: fallo"):format(i), "") end
+	assert(ns.ErrorCount() == 20, "se guardan los 20 últimos")
+	assert(LG.db.global.errors[1].msg:find(":30:", 1, true), "el más reciente va primero")
+	LG:SlashCommand("errores")
+	LG:SlashCommand("errors")
+	assert(GuildmarkErrorsFrame and GuildmarkErrorsFrame:IsShown(), "ventana de errores abierta")
+	ns.SelectTab("settings")
+	ns.ClearErrors()
+	assert(ns.ErrorCount() == 0 and ns.ErrorReport():find(ns.L["Sin errores registrados."], 1, true), "errores borrados")
+	GuildmarkErrorsFrame:Hide()
+	ns.SelectTab("home")
+	print_("OK registro de errores del addon")
 end
 
 -- Cada apartado de cada sección (los clics de arriba casi nunca llegan: los botones de
@@ -1502,6 +1531,20 @@ end
 -- Mensaje de muerte con honor: todas las variantes del juego (con rango y sin él); uno desconocido se guarda.
 do
 	local Hunt = ns.HuntModule
+	-- Con el registro de combate restringido (Forever) ni se intenta registrar el evento: el intento
+	-- hace saltar el aviso de Blizzard de «acción bloqueada» la primera vez que alguien usa el addon.
+	do
+		local savedCL, savedReg, tried = C_CombatLog, ns.RegisterEvent, false
+		C_CombatLog = { IsCombatLogRestricted = function() return true end }
+		ns.RegisterEvent = function(obj, event, ...)
+			if event == "COMBAT_LOG_EVENT_UNFILTERED" then tried = true end
+			return savedReg(obj, event, ...)
+		end
+		Hunt:OnEnable()
+		C_CombatLog, ns.RegisterEvent = savedCL, savedReg
+		assert(not tried and Hunt.hasCombatLog == false, "registro de combate restringido: no se registra el evento")
+		print_("OK registro de combate restringido: no se intenta registrar")
+	end
 	Hunt:OnEnable()
 	Hunt.hasCombatLog = nil -- en Forever el registro de combate está prohibido: las bajas salen del mensaje de honor
 	local before = 0

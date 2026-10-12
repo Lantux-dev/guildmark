@@ -6,7 +6,7 @@
 ## Author: Lantux
 ## X-License: GPL-3.0
 ## X-Donate: https://ko-fi.com/lantux
-## Version: 0.9.1
+## Version: 0.9.2
 ## SavedVariables: GuildmarkDB
 ## SavedVariablesPerCharacter: GuildmarkBackup
 ## IconTexture: Interface\AddOns\Guildmark\Media\emblem_small
@@ -15,6 +15,7 @@ embeds.xml
 
 Locale.lua
 Locales\enUS.lua
+Errors.lua
 Backup.lua
 Core.lua
 Comm.lua
@@ -58,6 +59,7 @@ UI\OrderDialog.lua
 UI\EventDialog.lua
 UI\AuctionFrame.lua
 UI\AchievementsFrame.lua
+UI\ErrorsFrame.lua
 UI\CallToArms.lua
 UI\WarMap.lua
 UI\WarHud.lua

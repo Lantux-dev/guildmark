@@ -1,5 +1,17 @@
 # Cambios · Changelog
 
+## 0.9.2 (beta) · 2026-10
+
+- Nuevo: `/gmk errores` abre una ventana con los errores del addon listos para copiar y avisar de un fallo (también desde Ajustes). No se envía nada a ningún sitio.
+- Arreglado: la primera vez que se cargaba el addon podía salir el aviso de Blizzard de «acción bloqueada».
+- Cabecera: el marco de la barra de reputación ya encaja con el relleno, y los iconos de insignias y cofre van sin fondo negro.
+
+---
+
+- New: `/gmk errors` opens a window with the addon errors ready to copy and report a bug (also from Settings). Nothing is sent anywhere.
+- Fixed: the first time the addon loaded, Blizzard's "action blocked" warning could show up.
+- Header: the reputation bar frame now fits the fill, and the badge and chest icons no longer have a black background.
+
 ## 0.9.1 (beta) · 2026-10
 
 - Arreglado: la ventana daba un error al abrirse si tenías un encargo al gremio que aún no había aceptado nadie.

@@ -2525,6 +2525,14 @@ views.settings = function()
 	toggleRow(rows, L["Modo prueba (tu grupo hace de hermandad)"], p.testMode, function() LG:SlashCommand("prueba") end)
 	toggleRow(rows, L["Mensajes de depuración en el chat"], p.debug, function() LG:SlashCommand("debug"); refresh() end)
 	space(rows)
+	header(rows, L["¿Algo ha fallado?"])
+	local nErrors = ns.ErrorCount()
+	line(rows, nErrors == 0 and L["Sin errores registrados."] or (RED .. (nErrors == 1 and L["1 error registrado"] or (L["%d errores registrados"]):format(nErrors)) .. R), 1, {
+		tall = true, icon = "Interface\\Icons\\INV_Misc_Note_01",
+		tooltip = { L["Errores del addon"], L["Guildmark guarda sus propios errores para que puedas copiarlos y avisar del fallo. No se envían a ningún sitio."] },
+		buttons = { { label = L["Ver errores"], onClick = ns.ShowErrors } },
+	})
+	space(rows)
 	line(rows, grey((L["%s %s · /gmk para abrir la ventana"]):format(ns.ADDON_TITLE, LG.VERSION)))
 	return rows
 end
@@ -4403,8 +4411,9 @@ local function progressBar(parent, width, height)
 	bar.bg:SetAllPoints()
 	setArt(bar.bg, "Legacy-Progressbar-BG", 0, 0, 0, 0.6)
 	bar.border = bar:CreateTexture(nil, "OVERLAY")
-	bar.border:SetPoint("TOPLEFT", -4, 4)
-	bar.border:SetPoint("BOTTOMRIGHT", 4, -4)
+	-- El marco de legado trae sombra por debajo y a los lados: sobresale más ahí para tapar el relleno.
+	bar.border:SetPoint("TOPLEFT", -6, 4)
+	bar.border:SetPoint("BOTTOMRIGHT", 6, -8)
 	if not setArt(bar.border, "Legacy-Progressbar-Frame") then bar.border:Hide() end
 	bar.text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	bar.text:SetPoint("CENTER")
@@ -4500,6 +4509,8 @@ local function updateHeader()
 	rankBar:SetShown(guildName ~= nil and me ~= nil)
 	insignias:SetShown(guildName ~= nil and me ~= nil)
 	frame.chestText:SetShown(guildName ~= nil and me ~= nil)
+	frame.insigniaIcon:SetShown(guildName ~= nil and me ~= nil)
+	frame.chestIcon:SetShown(guildName ~= nil and me ~= nil)
 	frame.chestButton:SetShown(guildName ~= nil and me ~= nil)
 	if guildName and me then
 		local rank, nextRank, rep = ns.MeritRank(me)
@@ -4513,8 +4524,8 @@ local function updateHeader()
 			rankBar.text:SetText(("%s  ·  %d rep"):format(rank.label, rep))
 		end
 		local s = ns.Scores()[me]
-		insignias:SetText(("|T%s:18:18:0:0:64:64:5:59:5:59|t %s%d|r %s"):format(ns.INSIGNIA_ICON, GREEN, s and s.merits or 0, L["insignias"]))
-		frame.chestText:SetText(("|T%s:14:14:0:0:64:64:5:59:5:59|t %s%d|r %s"):format(ns.CHEST_ICON, GOLD, ns.ChestState().balance, L["en el cofre"]))
+		insignias:SetText(("%s%d|r %s"):format(GREEN, s and s.merits or 0, L["insignias"]))
+		frame.chestText:SetText(("%s%d|r %s"):format(GOLD, ns.ChestState().balance, L["en el cofre"]))
 	end
 
 	-- Sin ser oficial no hay sección de oficial.
@@ -4704,12 +4715,30 @@ local function create()
 	rankBar = progressBar(frame, 390, 18)
 	rankBar:SetPoint("LEFT", profButton, "RIGHT", 12, 0)
 	-- A la derecha: tus insignias (bolsa) y, debajo, las del cofre de la hermandad (clic: Hermandad › Cofre).
+	-- Los iconos van redondos (con máscara): en cuadrado se les ve el fondo negro del icono.
+	frame.headerIcon = function(texture, size)
+		local icon = frame:CreateTexture(nil, "ARTWORK")
+		icon:SetSize(size, size)
+		icon:SetTexture(texture)
+		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		local mask = frame.CreateMaskTexture and frame:CreateMaskTexture() or nil
+		if mask and icon.AddMaskTexture then
+			mask:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+			mask:SetAllPoints(icon)
+			icon:AddMaskTexture(mask)
+		end
+		return icon
+	end
+	frame.insigniaIcon = frame.headerIcon(ns.INSIGNIA_ICON, 20)
+	frame.insigniaIcon:SetPoint("BOTTOMLEFT", rankBar, "RIGHT", 18, -2)
 	insignias = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-	insignias:SetPoint("BOTTOMLEFT", rankBar, "RIGHT", 18, -2)
+	insignias:SetPoint("LEFT", frame.insigniaIcon, "RIGHT", 5, 0)
+	frame.chestIcon = frame.headerIcon(ns.CHEST_ICON, 14)
+	frame.chestIcon:SetPoint("TOPLEFT", rankBar, "RIGHT", 21, -10)
 	frame.chestText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	frame.chestText:SetPoint("TOPLEFT", rankBar, "RIGHT", 20, -10)
+	frame.chestText:SetPoint("LEFT", frame.chestIcon, "RIGHT", 4, 0)
 	frame.chestButton = CreateFrame("Button", nil, frame)
-	frame.chestButton:SetPoint("TOPLEFT", frame.chestText, "TOPLEFT", -2, 2)
+	frame.chestButton:SetPoint("TOPLEFT", frame.chestIcon, "TOPLEFT", -2, 2)
 	frame.chestButton:SetPoint("BOTTOMRIGHT", frame.chestText, "BOTTOMRIGHT", 2, -2)
 	frame.chestButton:SetScript("OnClick", function() ns.SelectSubview("guild", "chest") end)
 	frame.chestButton:SetScript("OnEnter", function(self)

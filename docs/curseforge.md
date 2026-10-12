@@ -77,6 +77,7 @@ Nothing is shared until you say yes. `/gmk privacy` shows what is shared and let
 ## Getting started
 - `/gmk` opens the window.
 - `/gmk test` turns your party into a test guild, so you can try everything without touching your real guild.
+- `/gmk errors` shows the addon errors ready to copy, if you want to report a bug.
 - `/gmk profile` opens your profile.
 - `/gmk settings` for options, ranks and permissions.
 
@@ -139,6 +140,7 @@ No se comparte nada hasta que aceptas. `/gmk privacidad` te enseña qué se comp
 ## Para empezar
 - `/gmk` abre la ventana.
 - `/gmk prueba` convierte tu grupo en una hermandad de prueba para probarlo todo sin tocar tu hermandad real.
+- `/gmk errores` enseña los errores del addon listos para copiar, si quieres avisar de un fallo.
 - `/gmk perfil` abre tu perfil.
 - `/gmk ajustes` para las opciones, los rangos y los permisos.
 

@@ -1,0 +1,14 @@
+name: Idea / Sugerencia · Suggestion
+description: Algo que echas en falta o que cambiarías · Something you miss or would change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: ¿Qué propones? · What do you suggest?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: ¿Para qué te serviría? · What would it help you with?
