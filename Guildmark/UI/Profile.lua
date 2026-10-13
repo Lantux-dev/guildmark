@@ -36,8 +36,26 @@ local function roundIcon(parent, size, layer)
 		mask:SetTexture(ART.mask, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 		mask:SetAllPoints(icon)
 		icon:AddMaskTexture(mask)
+		icon.mask = mask
 	end
 	return icon
+end
+
+-- El arte propio trae su aro y sus puntas: sin aro, sin recorte redondo y algo más grande.
+local function setCustomArt(b, custom, normal, big)
+	b.ring:SetShown(not custom)
+	b.icon:SetTexCoord(custom and 0 or 0.07, custom and 1 or 0.93, custom and 0 or 0.07, custom and 1 or 0.93)
+	b.icon:SetSize(custom and big or normal, custom and big or normal)
+	local mask = b.icon.mask
+	if mask and b.icon.RemoveMaskTexture and b.icon.AddMaskTexture then
+		if custom and not b.unmasked then
+			b.icon:RemoveMaskTexture(mask)
+			b.unmasked = true
+		elseif not custom and b.unmasked then
+			b.icon:AddMaskTexture(mask)
+			b.unmasked = nil
+		end
+	end
 end
 
 local function ring(parent, size)
@@ -416,7 +434,9 @@ local function render()
 	for i, md in ipairs(ns.MemberMedals(name)) do
 		local s = f.slots[i]
 		local def = md.def
-		s.icon:SetTexture(ns.MEDAL_ART[def.key] and (ns.MEDIA .. "Medals\\" .. def.key) or def.icon)
+		local art = ns.MedalTexture(def.key, md.tier)
+		s.icon:SetTexture(art or def.icon)
+		setCustomArt(s, art ~= nil, SLOT - 8, SLOT + 10)
 		local tier = ns.MEDAL_TIERS[md.tier]
 		if tier then
 			s.icon:SetDesaturated(false)
@@ -462,6 +482,7 @@ local function render()
 		b:SetShown(h ~= nil)
 		if h then
 			b.icon:SetTexture(h.icon)
+			setCustomArt(b, h.custom, PICK - 4, PICK + 6)
 			local on = chosen[c.pick] ~= nil or (mine and not profile.badges)
 			b.icon:SetDesaturated(not on)
 			b.icon:SetAlpha(on and 1 or 0.45)

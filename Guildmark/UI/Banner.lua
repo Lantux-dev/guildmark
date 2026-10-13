@@ -84,7 +84,8 @@ local function resolveHonor(key)
 	local medal, mtier = key:match("^medal:(%a+):(%d)$")
 	if medal then
 		local def, tier = ns.Medal and ns.Medal(medal), ns.MEDAL_TIERS and ns.MEDAL_TIERS[tonumber(mtier)]
-		return def and tier and { icon = def.icon, color = tier.color, keepColor = true,
+		local art = def and tier and ns.MedalTexture and ns.MedalTexture(medal, mtier)
+		return def and tier and { icon = art or def.icon, custom = art ~= nil, color = tier.color, keepColor = true,
 			title = ("%s (%s)"):format(def.label, tier.label), sub = L["Medalla"] } or nil
 	end
 	if key == "elite" then
@@ -267,6 +268,23 @@ local function tooltip(self)
 	GameTooltip:Show()
 end
 
+-- Los iconos propios (tribus, medallas) traen su marco: sin aro, sin recorte redondo y algo más grandes.
+local function setCustomArt(b, custom, extra)
+	local size = custom and BADGE + (extra or 2) or BADGE - 6
+	b.ring:SetShown(not custom)
+	b.icon:SetTexCoord(custom and 0 or 0.07, custom and 1 or 0.93, custom and 0 or 0.07, custom and 1 or 0.93)
+	b.icon:SetSize(size, size)
+	if b.mask and b.icon.RemoveMaskTexture and b.icon.AddMaskTexture then
+		if custom and not b.unmasked then
+			b.icon:RemoveMaskTexture(b.mask)
+			b.unmasked = true
+		elseif not custom and b.unmasked then
+			b.icon:AddMaskTexture(b.mask)
+			b.unmasked = nil
+		end
+	end
+end
+
 local function badgeButton(parent)
 	local b = CreateFrame("Frame", nil, parent)
 	b:SetSize(BADGE, BADGE)
@@ -375,19 +393,7 @@ local function fill(f, unit, data)
 		b.icon:SetTexture(tex)
 		b.icon:SetVertexColor(1, 1, 1)
 		b.ring:SetVertexColor(1, 0.85, 0.4)
-		-- Los iconos propios traen su marco: sin aro, sin recorte redondo y algo más grandes.
-		b.ring:SetShown(not custom)
-		b.icon:SetTexCoord(custom and 0 or 0.07, custom and 1 or 0.93, custom and 0 or 0.07, custom and 1 or 0.93)
-		b.icon:SetSize(custom and BADGE + 2 or BADGE - 6, custom and BADGE + 2 or BADGE - 6)
-		if b.mask and b.icon.RemoveMaskTexture and b.icon.AddMaskTexture then
-			if custom and not b.unmasked then
-				b.icon:RemoveMaskTexture(b.mask)
-				b.unmasked = true
-			elseif not custom and b.unmasked then
-				b.icon:AddMaskTexture(b.mask)
-				b.unmasked = nil
-			end
-		end
+		setCustomArt(b, custom)
 		f.tribeBadge.tip = { ("%s «%s»"):format(ns.TribeWords().One, data.tribe) }
 		items[#items + 1] = f.tribeBadge
 	end
@@ -396,6 +402,7 @@ local function fill(f, unit, data)
 		b:SetShown(h ~= nil)
 		if h then
 			b.icon:SetTexture(h.icon)
+			setCustomArt(b, h.custom, 6)
 			local t = h.tint
 			b.icon:SetVertexColor(t and t[1] or 1, t and t[2] or 1, t and t[3] or 1)
 			local c = h.color

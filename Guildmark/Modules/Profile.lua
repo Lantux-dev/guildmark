@@ -14,9 +14,19 @@ local LG = ns.LG
 
 local MOTTO_MAX, STORY_MAX = 60, 300
 
--- Arte propio de las medallas (Media/Medals/<clave>.tga, 128x128 con alfa): se
--- marca aquí cuando el archivo existe; sin él, el icono del juego en un círculo.
-ns.MEDAL_ART = {}
+-- Arte propio de las medallas: Media/Medals/<clave>_<grado>.tga (128x128 con alfa), con
+-- 1 bronce, 2 plata y 3 oro. Es el mismo dibujo teñido, y ya trae su aro. Se marca aquí
+-- cuando los archivos existen; sin ellos, el icono del juego en un círculo.
+ns.MEDAL_ART = { hunter = true, avenger = true, shield = true, assault = true, regicide = true,
+	explorer = true, artisan = true, companion = true }
+
+-- La imagen de una medalla en un grado (sin grado, la de plata: sirve de silueta), o nil si no hay arte.
+function ns.MedalTexture(key, tier)
+	if not ns.MEDAL_ART[key] then return nil end
+	tier = tonumber(tier)
+	if not tier or tier < 1 or tier > 3 then tier = 2 end
+	return ns.MEDIA .. "Medals\\" .. key .. "_" .. tier
+end
 
 ns.MEDAL_TIERS = {
 	{ key = "bronze", label = L["bronce"], color = { 0.8, 0.5, 0.25 } },

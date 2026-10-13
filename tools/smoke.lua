@@ -388,6 +388,19 @@ do
 	print_("OK inicio con encargo al gremio sin artesano")
 end
 
+-- Arte de las medallas: una imagen por medalla y grado (sin grado, la de plata como silueta).
+do
+	for _, m in ipairs(ns.MEDALS) do
+		assert(ns.MEDAL_ART[m.key], "medalla sin arte: " .. m.key)
+		for tier = 1, 3 do assert(ns.MedalTexture(m.key, tier):find(m.key .. "_" .. tier, 1, true), "imagen de la medalla por grado") end
+		assert(ns.MedalTexture(m.key, nil):find(m.key .. "_2", 1, true), "sin grado: la de plata")
+	end
+	assert(ns.MedalTexture("noexiste", 1) == nil, "sin arte no hay imagen")
+	local h = ns.ResolveHonor("medal:hunter:3")
+	assert(h and h.custom and h.icon:find("hunter_3", 1, true), "la insignia del retrato usa el arte de la medalla")
+	print_("OK arte de las medallas")
+end
+
 -- Registro de errores (/gmk errores): solo los del addon, sin repetir, con tope, y el informe para copiar.
 do
 	ns.ClearErrors()

@@ -1,5 +1,13 @@
 # Cambios · Changelog
 
+## 0.9.3 (beta) · 2026-10
+
+- Nuevo: las ocho medallas del perfil tienen arte propio, con una imagen para bronce, plata y oro. También se ven junto al retrato.
+
+---
+
+- New: the eight profile medals have their own art, with an image for bronze, silver and gold. They also show next to the portrait.
+
 ## 0.9.2 (beta) · 2026-10
 
 - Nuevo: `/gmk errores` abre una ventana con los errores del addon listos para copiar y avisar de un fallo (también desde Ajustes). No se envía nada a ningún sitio.
