@@ -40,7 +40,7 @@ ns.MEDALS = {
 		desc = L["Muertes con honor registradas por el addon."], title = L["Cazador implacable"] },
 	{ key = "avenger", label = L["Vengador"], icon = "Interface\\Icons\\Ability_Warrior_Revenge", tiers = { 3, 15, 50 },
 		desc = L["Venganzas: matar a quien acaba de matar a un compañero."], title = L["Vengador de los suyos"] },
-	{ key = "shield", label = L["Escudo de la facción"], icon = "Interface\\Icons\\Ability_Defend", tiers = { 1, 10, 30 },
+	{ key = "shield", label = L["Escudo"], icon = "Interface\\Icons\\Ability_Defend", tiers = { 1, 10, 30 },
 		desc = L["Bajas ayudando en llamadas de auxilio y asaltos de otras hermandades."], title = L["Escudo de la facción"] },
 	{ key = "assault", label = L["Asaltante"], icon = "Interface\\Icons\\INV_BannerPVP_01", tiers = { 1, 5, 15 },
 		desc = L["Asaltos completados en los que participaste (con alguna baja en la ciudad)."], title = L["Asaltante de capitales"] },

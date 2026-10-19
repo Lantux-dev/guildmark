@@ -581,6 +581,14 @@ end
 local toasts = {}
 
 function ns.ShowAchievementToast(entry)
+	-- Un complemento puede pintar el aviso a su manera (GuildmarkAPI.RegisterToastHandler).
+	if ns.toastHandler then
+		local def = entry.def
+		local info = { id = def.id, name = def.name, desc = def.desc, icon = def.icon, category = def.cat or def.category,
+			gold = ns.GuildPerks().goldToast and true or false }
+		local ok, handled = pcall(ns.toastHandler, info)
+		if ok and handled then return end
+	end
 	local slot = #toasts + 1
 	local t = CreateFrame("Button", nil, UIParent)
 	t:SetSize(380, 84)

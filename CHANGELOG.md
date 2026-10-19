@@ -1,5 +1,19 @@
 # Cambios · Changelog
 
+## 1.0.0 · 2026-10
+
+Primera versión estable, ya pública para todo el mundo.
+
+- La medalla «Escudo de la facción» se llama «Escudo» en el estuche (el título que da el oro no cambia).
+- API para complementos: `GuildmarkAPI.RegisterToastHandler` permite a otra interfaz pintar los avisos de logro de hermandad a su manera.
+
+---
+
+First stable release, now public for everyone.
+
+- The «Shield of the Faction» medal is shown as «Shield» in the medal case (the gold title is unchanged).
+- Add-on API: `GuildmarkAPI.RegisterToastHandler` lets another UI draw the guild achievement toasts its own way.
+
 ## 0.9.3 (beta) · 2026-10
 
 - Nuevo: las ocho medallas del perfil tienen arte propio, con una imagen para bronce, plata y oro. También se ven junto al retrato.

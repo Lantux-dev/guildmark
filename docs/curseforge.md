@@ -11,7 +11,7 @@ Texto para la página de CurseForge.
 
 **A living guild for WoW Forever** · *Español más abajo*
 
-> **Beta 0.9:** almost everything has been tested on the WoW Forever beta; battlegrounds, dungeon tracking and the guild bank will be fully checked on the live game. Found a bug? Let us know in the comments.
+> **1.0:** tested on the WoW Forever beta. Battlegrounds, raids (they open on December 9) and the guild bank in large guilds will get a final check on the live game. Found a bug? Type `/gmk errors` and tell us in the comments.
 
 Guildmark turns your guild into something you can see: who is online and what they are doing, events everyone signs up for, a badge economy the whole guild takes part in, crafters taking orders, tribes inside the guild, a profile full of medals, and a whole faction answering when an enemy guild hunts you.
 
@@ -89,7 +89,7 @@ The more of your guild uses Guildmark, the more it shows.
 
 **Una hermandad viva para WoW Forever**
 
-> **Beta 0.9:** casi todo está probado en la beta de WoW Forever; los campos de batalla, las mazmorras y el banco de la hermandad se comprobarán del todo con el juego final. ¿Encuentras un fallo? Cuéntanoslo en los comentarios.
+> **1.0:** probado en la beta de WoW Forever. Los campos de batalla, las bandas (abren el 9 de diciembre) y el banco en hermandades grandes tendrán su última comprobación con el juego final. ¿Encuentras un fallo? Escribe `/gmk errores` y cuéntanoslo en los comentarios.
 
 Guildmark hace visible tu hermandad: quién está conectado y qué hace, eventos a los que todos se apuntan, una economía de insignias en la que participa toda la hermandad, artesanos que aceptan encargos, tribus, un perfil lleno de medallas y una facción entera que acude cuando una hermandad enemiga os caza.
 

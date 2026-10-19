@@ -11,11 +11,16 @@
 --   GuildmarkAPI.GuildName()      -> hermandad actual (o "~Pruebas" en modo prueba)
 --   GuildmarkAPI.ShowDialog(spec) -> ventana de formulario del addon
 --   GuildmarkAPI.Refresh()        -> repinta la ventana
+--   GuildmarkAPI.RegisterToastHandler(fn) -> fn(info) recibe cada logro de hermandad recién
+--       completado ({ id, name, desc, icon, category, gold }); si devuelve true, el addon no
+--       muestra su propio aviso (para que una interfaz lo pinte a su manera). nil lo quita.
 local _, ns = ...
 local LG = ns.LG
 
 -- Publicador registrado por un complemento (nil sin complementos).
 ns.publisher = nil
+-- Quien pinta los avisos de logro en lugar del addon (nil: el aviso propio).
+ns.toastHandler = nil
 
 -- Botón de publicar para la cabecera de un apartado, si hay complemento.
 function ns.PublishButton(section)
@@ -31,7 +36,7 @@ function ns.Publish(section)
 end
 
 GuildmarkAPI = {
-	version = 1,
+	version = 2,
 	RegisterPublisher = function(p)
 		if type(p) == "table" then
 			ns.publisher = p
@@ -44,4 +49,7 @@ GuildmarkAPI = {
 	GuildName = function() return LG:GuildName() end,
 	ShowDialog = function(spec) return ns.ShowInputDialog(spec) end,
 	Refresh = function() if ns.RefreshMainFrame then ns.RefreshMainFrame() end end,
+	RegisterToastHandler = function(fn)
+		ns.toastHandler = type(fn) == "function" and fn or nil
+	end,
 }

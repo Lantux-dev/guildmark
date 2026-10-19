@@ -388,6 +388,20 @@ do
 	print_("OK inicio con encargo al gremio sin artesano")
 end
 
+-- API: un complemento puede pintar los avisos de logro de hermandad a su manera.
+do
+	local got
+	GuildmarkAPI.RegisterToastHandler(function(info) got = info; return true end)
+	local entry = ns.AchievementState().list[1]
+	ns.ShowAchievementToast(entry)
+	assert(got and got.id == entry.def.id and got.name == entry.def.name and got.icon, "el complemento recibe el logro")
+	GuildmarkAPI.RegisterToastHandler(function() error("roto") end)
+	ns.ShowAchievementToast(entry) -- si el complemento falla, sale el aviso propio sin romper nada
+	GuildmarkAPI.RegisterToastHandler(nil)
+	assert(ns.toastHandler == nil and GuildmarkAPI.version == 2, "se puede quitar")
+	print_("OK avisos de logro para complementos")
+end
+
 -- Arte de las medallas: una imagen por medalla y grado (sin grado, la de plata como silueta).
 do
 	for _, m in ipairs(ns.MEDALS) do
