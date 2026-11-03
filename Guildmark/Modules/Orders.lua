@@ -9,6 +9,10 @@
 -- la puede marcar cualquiera de los dos. La entrega se detecta sola al ver el
 -- objeto pasar de uno a otro en la ventana de intercambio.
 --
+-- Al pedir se puede decir que los materiales los pone quien pide (mats) y prometer una
+-- propina en cobre (tip). El addon no mueve oro ni objetos: se dan en el intercambio y el
+-- artesano lo ve confirmado (matsIn, tipPaid) cuando le llegan, o lo marca a mano.
+--
 -- Encargo al gremio (guild = true, sin artesano): lo puede aceptar cualquiera que
 -- no sea quien lo pide, y al aceptarlo pasa a ser su artesano. Si dos aceptan a la
 -- vez (misma "rev"), todos los addons se quedan con el mismo: el que lo hizo antes
@@ -20,6 +24,7 @@ local L = ns.L
 local LG = ns.LG
 
 local Orders = LG:NewModule("Orders", "AceEvent-3.0")
+ns.OrdersModule = Orders -- para las pruebas
 
 local ORDER_TTL = 30 * 86400
 local GUILD_ORDER_TTL = 7 * 86400 -- encargo al gremio sin aceptar: caduca
@@ -29,6 +34,7 @@ function ns.OrderExpired(o)
 	return o.guild and o.status == "open" and ns.Now() - (o.t or 0) > GUILD_ORDER_TTL or false
 end
 local TRADE_SLOTS = 6 -- el séptimo hueco es "no se intercambiará"
+local MAX_TIP = 1000 * 10000 -- propina máxima: 1.000 de oro (en cobre)
 
 -- Quién puede dejar el encargo en cada estado.
 local function authorized(order, status, who)
@@ -49,6 +55,16 @@ end
 
 function ns.MergeOrder(g, rec, sender)
 	if type(rec.id) ~= "string" or type(rec.rev) ~= "number" then return false end
+	if rec.tip ~= nil and (type(rec.tip) ~= "number" or rec.tip < 1 or rec.tip > MAX_TIP or rec.tip ~= math.floor(rec.tip)) then return false end
+	if rec.tipPaid ~= nil and (type(rec.tipPaid) ~= "number" or rec.tipPaid < 0 or rec.tipPaid > MAX_TIP * 10) then return false end
+	if rec.matsGot ~= nil then
+		if type(rec.matsGot) ~= "table" then return false end
+		local n = 0
+		for id, count in pairs(rec.matsGot) do
+			n = n + 1
+			if type(id) ~= "number" or type(count) ~= "number" or count < 0 or count > 100000 or n > 16 then return false end
+		end
+	end
 	if not authorized(rec, rec.status, rec.by) then return false end
 	if sender and rec.by ~= sender then return false end
 	if rec.guild and rec.status == "accepted" and rec.crafter ~= rec.by then return false end
@@ -56,6 +72,9 @@ function ns.MergeOrder(g, rec, sender)
 	if old then
 		-- Lo que no cambia nunca: quién lo pide, qué y cuánto, y si es al gremio.
 		if old.requester ~= rec.requester or old.recipe ~= rec.recipe or old.qty ~= rec.qty or (old.guild or false) ~= (rec.guild or false) then return false end
+		if (old.mats or false) ~= (rec.mats or false) or (old.tip or 0) ~= (rec.tip or 0) then return false end
+		-- Lo confirmado (materiales recibidos, propina pagada) no se deshace.
+		if old.matsIn and not rec.matsIn or old.tipPaid and not rec.tipPaid then return false end
 		-- Un encargo directo no cambia de artesano.
 		if not old.guild and old.crafter ~= rec.crafter then return false end
 		if old.rev > rec.rev then return false end
@@ -70,6 +89,12 @@ local function notify(rec, old)
 	local me = ns.PlayerFullName()
 	if rec.by == me then return end
 	local what = ("%dx %s"):format(rec.qty or 1, ns.RecipeName(rec.recipe) or "?")
+	if not old and (rec.mats or rec.tip) then
+		local extra = {}
+		if rec.mats then extra[#extra + 1] = L["pone los materiales"] end
+		if rec.tip then extra[#extra + 1] = (L["propina %s"]):format(ns.MoneyText(rec.tip)) end
+		what = what .. " (" .. table.concat(extra, ", ") .. ")"
+	end
 	if rec.guild and rec.status == "open" and not old and rec.requester ~= me and ns.KnowsRecipe(me, rec.recipe) then
 		LG:Print((L["Encargo para tu gremio: %s (lo pide %s). El primero que lo acepte se lo queda: /gmk > Encargos."]):format(what, ns.ShortName(rec.requester)))
 	elseif rec.guild and rec.status == "accepted" and old and old.status == "accepted" and old.crafter == me and rec.crafter ~= me then
@@ -116,7 +141,7 @@ local function outputItem(crafter, recipeID)
 end
 
 -- crafter = nil: al gremio de esa receta (skillLine, para mostrar de qué gremio es).
-function ns.CreateOrder(crafter, recipeID, qty, note, skillLine)
+function ns.CreateOrder(crafter, recipeID, qty, note, skillLine, mats, tip)
 	local g = LG:GuildData()
 	if not g or not LG:HasConsent() then return end
 	local me = ns.PlayerFullName()
@@ -136,6 +161,8 @@ function ns.CreateOrder(crafter, recipeID, qty, note, skillLine)
 		item = item,
 		qty = math.max(1, math.floor(tonumber(qty) or 1)),
 		note = note and note ~= "" and note:sub(1, 80) or nil,
+		mats = mats and true or nil,
+		tip = (tonumber(tip) or 0) >= 1 and math.min(MAX_TIP, math.floor(tonumber(tip))) or nil,
 		status = "open",
 		rev = 1,
 		by = me,
@@ -193,6 +220,17 @@ function ns.SetOrderStatus(id, status, extra)
 	rec.updated = ns.Now()
 	publish(g, rec)
 	return true
+end
+
+-- El artesano confirma a mano que le han llegado los materiales o la propina (si el
+-- intercambio no lo detectó). what = "mats" o "tip".
+function ns.MarkOrderReceived(id, what)
+	local g = LG:GuildData()
+	local o = g and g.orders[id]
+	if not o or o.crafter ~= ns.PlayerFullName() or (o.status ~= "accepted" and o.status ~= "done") then return false end
+	if what == "mats" and o.mats and not o.matsIn then return ns.SetOrderStatus(id, o.status, { matsIn = true }) end
+	if what == "tip" and o.tip and not o.tipPaid then return ns.SetOrderStatus(id, o.status, { tipPaid = o.tip }) end
+	return false
 end
 
 function ns.OrdersByRole()
@@ -296,6 +334,8 @@ function Orders:TRADE_ACCEPT_UPDATE()
 	local tip = C_TooltipInfo or {}
 	trade.give = snapshotSide(GetTradePlayerItemLink, GetTradePlayerItemInfo, tip.GetTradePlayerItem)
 	trade.get = snapshotSide(GetTradeTargetItemLink, GetTradeTargetItemInfo, tip.GetTradeTargetItem)
+	trade.giveMoney = GetPlayerTradeMoney and tonumber(GetPlayerTradeMoney()) or 0
+	trade.getMoney = GetTargetTradeMoney and tonumber(GetTargetTradeMoney()) or 0
 end
 
 function Orders:UI_INFO_MESSAGE(_, _, message)
@@ -305,13 +345,69 @@ function Orders:UI_INFO_MESSAGE(_, _, message)
 	self:CheckDeliveries(done)
 end
 
+-- Componentes de una receta (los objetos que gasta), si el cliente los sabe: solo para
+-- recetas que conoce este personaje, que es justo el artesano.
+local function reagentsOf(recipeID)
+	local list = ns.RecipeReagents and ns.RecipeReagents(recipeID)
+	if not list then return nil end
+	local set = {}
+	for _, r in ipairs(list) do set[r.id] = true end
+	return set
+end
+
+-- Lo que el artesano recibe de quien pide en un intercambio: los materiales (algún
+-- componente de la receta, o cualquier objeto si no se saben) y la propina prometida.
+-- Lo que falta de cada material: { { id, need, got } } (need = receta x unidades), o nil si no se sabe.
+function ns.OrderMaterialsProgress(o)
+	local list = ns.RecipeReagents and ns.RecipeReagents(o.recipe)
+	if not list then return nil end
+	local out = {}
+	for _, r in ipairs(list) do
+		out[#out + 1] = { id = r.id, need = r.n * (o.qty or 1), got = o.matsGot and o.matsGot[r.id] or 0 }
+	end
+	return out
+end
+
+local function receivedExtras(o, t)
+	local extra
+	if o.mats and not o.matsIn and t.get and next(t.get) then
+		local list = ns.RecipeReagents and ns.RecipeReagents(o.recipe)
+		if not list then
+			-- Sin saber la receta: cualquier objeto de quien pide cuenta como los materiales.
+			extra = { matsIn = true }
+		else
+			-- Se suma lo recibido en este intercambio a lo de antes; completo cuando llega todo.
+			local got, changed, complete = {}, false, true
+			for id, count in pairs(o.matsGot or {}) do got[id] = count end
+			for _, r in ipairs(list) do
+				local now = t.get[r.id]
+				if now then
+					got[r.id] = (got[r.id] or 0) + (now.count or 1)
+					changed = true
+				end
+				if (got[r.id] or 0) < r.n * (o.qty or 1) then complete = false end
+			end
+			if changed then extra = { matsGot = got, matsIn = complete or nil } end
+		end
+	end
+	if o.tip and not o.tipPaid and (t.getMoney or 0) >= o.tip then
+		extra = extra or {}
+		extra.tipPaid = math.min(t.getMoney, MAX_TIP * 10)
+	end
+	return extra
+end
+
 function Orders:CheckDeliveries(t)
 	local g = LG:GuildData()
 	if not g then return end
 	if ns.CheckAuctionDeliveries then ns.CheckAuctionDeliveries(t.partner, t.give) end
+	if ns.CheckBankAskDeliveries then ns.CheckBankAskDeliveries(t.partner, t.give, t.get) end
 	local me = ns.PlayerFullName()
 	for id, o in pairs(g.orders) do
-		if o.status == "accepted" or o.status == "open" then
+		if o.status == "done" and o.crafter == me and ns.SameName(o.requester, t.partner) then
+			local extra = receivedExtras(o, t)
+			if extra then ns.SetOrderStatus(id, "done", extra) end
+		elseif o.status == "accepted" or o.status == "open" then
 			local item, side
 			if o.crafter == me and ns.SameName(o.requester, t.partner) then
 				item = o.item and t.give and t.give[o.item]
@@ -320,9 +416,14 @@ function Orders:CheckDeliveries(t)
 				item = o.item and t.get and t.get[o.item]
 				side = "requester"
 			end
+			local extra = side == "crafter" and receivedExtras(o, t) or nil
 			if item then
 				local verified = item.createdBy and ns.SameName(item.createdBy, o.crafter) or nil
-				ns.SetOrderStatus(id, "done", { delivered = item.count, verified = verified, auto = side })
+				local fields = { delivered = item.count, verified = verified, auto = side }
+				for k, v in pairs(extra or {}) do fields[k] = v end
+				ns.SetOrderStatus(id, "done", fields)
+			elseif extra and o.status == "accepted" then
+				ns.SetOrderStatus(id, "accepted", extra)
 			end
 		end
 	end

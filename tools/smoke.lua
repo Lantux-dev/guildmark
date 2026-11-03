@@ -402,6 +402,130 @@ do
 	print_("OK avisos de logro para complementos")
 end
 
+-- Encargos con materiales y propina: el artesano los ve confirmados en el intercambio.
+do
+	local me = ns.PlayerFullName()
+	local now = ns.Now()
+	local rec = { id = "test:tip:1", t = now, requester = "Ana Sol", crafter = me, recipe = 2331, item = 2851, qty = 1,
+		mats = true, tip = 12500, status = "open", rev = 1, by = "Ana Sol", updated = now }
+	ns.handlers.ORDER("Ana Sol", rec)
+	assert(g.orders["test:tip:1"] and g.orders["test:tip:1"].tip == 12500, "encargo con propina")
+	local bad = {}
+	for k, v in pairs(rec) do bad[k] = v end
+	bad.rev, bad.tip = 2, 1
+	ns.handlers.ORDER("Ana Sol", bad)
+	assert(g.orders["test:tip:1"].tip == 12500, "la propina prometida no se puede cambiar")
+	assert(ns.SetOrderStatus("test:tip:1", "accepted"), "el artesano acepta")
+	local Orders = ns.OrdersModule
+	-- Primer intercambio: le dan los materiales (sin saber los componentes, vale cualquier objeto).
+	Orders:CheckDeliveries({ partner = "Ana Sol", give = {}, get = { [2840] = { count = 5 } }, getMoney = 0 })
+	assert(g.orders["test:tip:1"].matsIn and g.orders["test:tip:1"].status == "accepted", "materiales recibidos")
+	-- Segundo: entrega el objeto y recibe la propina.
+	Orders:CheckDeliveries({ partner = "Ana Sol", give = { [2851] = { count = 1 } }, get = {}, getMoney = 12500 })
+	local o = g.orders["test:tip:1"]
+	assert(o.status == "done" and o.tipPaid == 12500 and o.matsIn, "entregado con la propina pagada")
+	-- A mano: otro encargo, propina marcada por el artesano.
+	local rec2 = { id = "test:tip:2", t = now, requester = "Ana Sol", crafter = me, recipe = 2331, item = 2851, qty = 1,
+		tip = 500, status = "open", rev = 1, by = "Ana Sol", updated = now }
+	ns.handlers.ORDER("Ana Sol", rec2)
+	ns.SetOrderStatus("test:tip:2", "accepted")
+	assert(ns.MarkOrderReceived("test:tip:2", "tip") and g.orders["test:tip:2"].tipPaid == 500, "propina marcada a mano")
+	assert(not ns.MarkOrderReceived("test:tip:2", "mats"), "sin materiales prometidos no se marcan")
+	g.orders["test:tip:1"], g.orders["test:tip:2"] = nil, nil
+	-- Materiales de la receta para quien pide: los comparte el artesano en su ficha.
+	g.members["Matero Prueba"] = { name = "Matero Prueba", t = now, recipes = { [164] = { ids = { 999001 }, mats = { [999001] = "2589:3,2320:1" } } } }
+	local mats = ns.RecipeReagents(999001)
+	assert(mats and #mats == 2 and mats[1].id == 2589 and mats[1].n == 3, "materiales de la receta desde la ficha del artesano")
+	ns.ShowOrderDialog("Matero Prueba", 999001, nil)
+	ns.UpdateOrderMaterials()
+	local rec3 = { id = "test:tip:3", t = now, requester = "Ana Sol", crafter = me, recipe = 999001, item = 2851, qty = 2,
+		mats = true, status = "open", rev = 1, by = "Ana Sol", updated = now }
+	ns.handlers.ORDER("Ana Sol", rec3)
+	ns.SetOrderStatus("test:tip:3", "accepted")
+	Orders:CheckDeliveries({ partner = "Ana Sol", give = {}, get = { [2589] = { count = 6 } }, getMoney = 0 })
+	local o3 = g.orders["test:tip:3"]
+	assert(o3.matsGot and o3.matsGot[2589] == 6 and not o3.matsIn, "llega parte: 6/6 de uno, 0/2 del otro")
+	local prog = ns.OrderMaterialsProgress(o3)
+	assert(prog[1].need == 6 and prog[2].need == 2 and prog[2].got == 0, "lo que falta, receta x unidades")
+	Orders:CheckDeliveries({ partner = "Ana Sol", give = {}, get = { [2320] = { count = 2 } }, getMoney = 0 })
+	assert(g.orders["test:tip:3"].matsIn, "con todo, materiales recibidos")
+	g.orders["test:tip:3"] = nil
+	g.members["Matero Prueba"] = nil
+	print_("OK encargos con materiales y propina")
+end
+
+-- Banco del juego: foto del contenido (lectura, sincronía, pestañas por rango) y peticiones.
+do
+	local me = ns.PlayerFullName()
+	local Vault = ns.BankVaultModule
+	g.bankSnap = { tabs = {} }
+	-- Lectura con el banco abierto: dos pestañas, la segunda oculta para este rango.
+	local saved = { GetNumGuildBankTabs, GetGuildBankTabInfo, GetGuildBankItemLink, GetGuildBankItemInfo, QueryGuildBankTab, GetGuildBankMoney }
+	local queried = {}
+	GetNumGuildBankTabs = function() return 2 end
+	GetGuildBankTabInfo = function(n) return "Pestaña " .. n, 134400, n == 1 end
+	GetGuildBankItemLink = function(n, slot)
+		if n == 1 and slot == 1 then return "|cffffffff|Hitem:2589::::::::|h[Lino]|h|r" end
+		if n == 1 and slot == 9 then return "|cff1eff00|Hitem:15000:0:0:0:0:0:-17:0|h[Capa del oso]|h|r" end
+	end
+	GetGuildBankItemInfo = function(n, slot) return 132889, slot == 1 and 20 or 1 end
+	QueryGuildBankTab = function(n) queried[#queried + 1] = n end
+	GetGuildBankMoney = function() return 123456 end
+	local savedTimer = Vault.ScheduleTimer
+	Vault.ScheduleTimer = function() return nil end -- los temporizadores del mock no corren: se llama a mano
+	Vault:StartScan()
+	assert(Vault.waiting == 1 and #queried == 1, "pide al juego solo las pestañas que ve")
+	Vault:ReadTab(1, false)
+	local tab = g.bankSnap.tabs[1]
+	assert(tab and tab.slots[1].id == 2589 and tab.slots[1].n == 20 and not tab.slots[1].l, "objeto y cantidad (sin enlace si no tiene sufijo)")
+	assert(tab.slots[9].l and tab.slots[9].id == 15000, "con sufijo se guarda el enlace")
+	assert(g.bankSnap.money.amount == 123456 and not g.bankSnap.tabs[2], "oro del banco y nada de la pestaña que no ve")
+	Vault.ScheduleTimer = savedTimer
+	GetNumGuildBankTabs, GetGuildBankTabInfo, GetGuildBankItemLink, GetGuildBankItemInfo, QueryGuildBankTab, GetGuildBankMoney = unpack(saved, 1, 6)
+
+	-- Foto de otro miembro: gana la más reciente; una vieja o mal formada no pisa.
+	local other = "Vexa Sombrafría"
+	assert(ns.MergeBankSnapshot(g, { tabs = { [1] = { t = tab.t + 60, by = other, name = "Materiales", slots = { [1] = { id = 2589, n = 50 } } } } }, other), "foto más reciente")
+	assert(g.bankSnap.tabs[1].slots[1].n == 50, "se queda la nueva")
+	assert(not ns.MergeBankSnapshot(g, { tabs = { [1] = { t = tab.t, by = other, slots = {} } } }, other), "una más vieja no pisa")
+	assert(not ns.MergeBankSnapshot(g, { tabs = { [1] = { t = tab.t + 999, by = "Otro", slots = {} } } }, other), "firmada por otro: no")
+	ns.MergeBankSnapshot(g, { tabs = { [2] = { t = tab.t + 60, by = other, name = "Oficiales", slots = { [3] = { id = 2592, n = 5 } } } } }, other)
+	assert(#ns.BankTabs(me) == 2 and ns.BankItemCount(2589, me) == 50, "pestañas visibles y unidades")
+	-- El maestro limita la pestaña 2 a los oficiales (rango 1): un recluta no la ve.
+	ns.SetGuildSetting("bankTab:2", 1)
+	LG.db.profile.testRank = 4
+	assert(#ns.BankTabs(me) == 1, "pestaña oculta para el rango")
+	LG.db.profile.testRank = nil
+	g.settings["bankTab:2"] = nil
+
+	-- Peticiones: un miembro pide, un oficial la coge, la saca del banco y la entrega.
+	local now = ns.Now()
+	local ask = { id = "test:ask:x", t = now, requester = "Ana Sol", item = 2589, qty = 10, status = "open", rev = 1, by = "Ana Sol", updated = now }
+	ns.handlers.BANKASK("Ana Sol", ask)
+	assert(g.bankAsks["test:ask:x"], "petición recibida")
+	local lists = ns.BankAskLists()
+	local pending = false
+	for _, a in ipairs(lists.pending) do if a.id == "test:ask:x" then pending = true end end
+	assert(pending, "le llega a quien puede entregar")
+	assert(ns.SetBankAskStatus("test:ask:x", "accepted"), "el oficial la coge")
+	local a = g.bankAsks["test:ask:x"]
+	-- Otro oficial no se la puede quitar una vez cogida.
+	local stolen = {}
+	for k, v in pairs(a) do stolen[k] = v end
+	stolen.rev, stolen.by, stolen.officer, stolen.updated = a.rev + 1, "Vexa Sombrafría", "Vexa Sombrafría", now + 5
+	ns.handlers.BANKASK("Vexa Sombrafría", stolen)
+	assert(g.bankAsks["test:ask:x"].officer == me, "una vez cogida no cambia de oficial")
+	assert(a.officer == me and a.acceptedAt and not ns.BankAskWithdrawn(g, a), "aún sin retirar")
+	g.bankLog["test|out"] = { member = me, kind = "itemOut", item = 2589, amount = 10, hour = math.floor(now / 3600), t = now }
+	assert(ns.BankAskWithdrawn(g, a), "retirada vista en el registro del banco")
+	ns.CheckBankAskDeliveries("Ana Sol", { [2589] = { count = 10 } }, {})
+	assert(g.bankAsks["test:ask:x"].status == "done" and g.bankAsks["test:ask:x"].auto == "trade", "entregada en el intercambio")
+	assert(not ns.CreateBankAsk(2589, nil, 999, ""), "no se pide más de lo que hay")
+	g.bankAsks["test:ask:x"], g.bankLog["test|out"] = nil, nil
+	g.bankSnap = { tabs = {} }
+	print_("OK banco: foto del contenido y peticiones")
+end
+
 -- Arte de las medallas: una imagen por medalla y grado (sin grado, la de plata como silueta).
 do
 	for _, m in ipairs(ns.MEDALS) do
@@ -448,7 +572,7 @@ end
 -- navegación cambian de sección antes), pintado y con sus botones pulsados.
 do
 	local subClicks, seen = 0, 0
-	for _, tab in ipairs({ "market", "hunt", "guild", "pve", "faction" }) do
+	for _, tab in ipairs({ "market", "hunt", "guild", "pve", "faction", "bank" }) do
 		for _, key in ipairs(ns.SubviewKeys(tab)) do
 			ns.SelectSubview(tab, key)
 			seen = seen + 1

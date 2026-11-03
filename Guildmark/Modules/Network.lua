@@ -64,7 +64,7 @@ function ns.MergeSetting(g, rec, sender)
 	if not ns.CanManageEvents(rec.by) then return false end
 	-- Quién es oficial, los permisos por rango y los nombres de los rangos del addon
 	-- solo los decide el maestro de hermandad.
-	if rec.key == "officerMaxRank" or rec.key:match("^perm:") then
+	if rec.key == "officerMaxRank" or rec.key:match("^perm:") or rec.key:match("^bankTab:") then
 		if not ns.IsGuildMaster(rec.by) then return false end
 		if rec.value ~= nil and (type(rec.value) ~= "number" or rec.value < 0 or rec.value > 9) then return false end
 		if rec.key == "officerMaxRank" and rec.value == nil then return false end

@@ -23,7 +23,7 @@ Guildmark turns your guild into something you can see: who is online and what th
 - **Now:** who is online, what they are doing and who they are grouped with.
 - **Members, tribes, rankings and chronicle** of everything the guild does.
 - **Guild chest:** the guild's shared badges, invested in **projects**: the guild standard on every portrait, or boosted events like *Dungeons Galore*, *Hunting Season* or *Call to Arms: Battlegrounds*.
-- **Guild bank:** gold and item deposits are recorded automatically. Officers post **bank requests** ("200 copper ore") and whoever brings them gets paid in badges from the chest.
+- **Guild bank:** see what is inside, laid out like the in-game bank, and **request items** from the officers. Deposits are recorded automatically, and officers post **deposit requests** ("200 copper ore") paid in badges from the chest.
 
 [CAPTURA: Hermandad › Cofre]
 
@@ -50,7 +50,7 @@ A monthly calendar, sign-up by role, reminders, and attendance confirmed automat
 ### Market
 - **Badge auction**, never gold: anyone sells their items to the guild for a day and keeps 90%.
 - **Crafters:** the whole guild's recipe book by profession and category.
-- **Orders** to one crafter or to all of them. Delivery is detected automatically in the trade window.
+- **Orders** to one crafter or to all of them, with your own materials and a tip if you want. Delivery, materials and tip are checked automatically in the trade window.
 - **Shop:** frames and velvets for your profile.
 
 [CAPTURA: Mercado › Subasta]
@@ -99,7 +99,7 @@ Guildmark hace visible tu hermandad: quién está conectado y qué hace, eventos
 - **Ahora:** quién está conectado, qué hace y con quién va.
 - **Miembros, tribus, clasificaciones y crónica** de todo lo que hace la hermandad.
 - **Cofre de hermandad:** las insignias de todos, invertidas en **proyectos**: el estandarte de la hermandad en el retrato de todos, o eventos como *Mazmorras por doquier*, *Temporada de caza* o *Llamamiento a las armas: Campos de batalla*.
-- **Banco de la hermandad:** las aportaciones de oro y objetos se registran solas. Los oficiales hacen **pedidos del banco** («200 menas de cobre») y quien los trae cobra insignias del cofre.
+- **Banco de la hermandad:** mira lo que hay dentro, como en el juego, y **pide objetos** a los oficiales. Las aportaciones se registran solas y los oficiales hacen **pedidos de depósito** («200 menas de cobre») que se pagan con insignias del cofre.
 
 ### Eventos
 Calendario mensual, inscripción por rol, recordatorios y asistencia confirmada sola si vas en grupo con la hermandad.
@@ -119,7 +119,7 @@ Calendario mensual, inscripción por rol, recordatorios y asistencia confirmada 
 ### Mercado
 - **Subasta con insignias**, nunca oro: cualquiera vende lo suyo a la hermandad durante un día y se queda el 90 %.
 - **Gremios:** el recetario de toda la hermandad por profesión y categoría.
-- **Encargos** a un artesano o al gremio entero. La entrega se detecta sola en el intercambio.
+- **Encargos** a un artesano o al gremio entero, con tus materiales y propina si quieres. La entrega, los materiales y la propina se comprueban solos en el intercambio.
 - **Tienda:** marcos y terciopelos para tu perfil.
 
 ### Tu perfil

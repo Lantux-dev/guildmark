@@ -8,6 +8,8 @@ ns.LG = LG
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\"
 
 local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+-- Datos de un objeto: en los clientes modernos (Forever) la función global ya no existe, va en C_Item.
+ns.GetItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
 LG.VERSION = GetAddOnMetadata(ADDON_NAME, "Version") or "0.0.0"
 
 -- Tiempo mínimo entre dos envíos de nuestro propio registro a la guild.
@@ -81,6 +83,8 @@ local defaults = {
 				purchases = {},   -- [id] = compra en la tienda (Shop.lua)
 				bankLog = {},     -- [clave] = depósito o retirada en el banco de la hermandad del juego (GuildBank.lua)
 				bankRequests = {}, -- [id] = pedido del banco: objeto, cantidad y recompensa del cofre (GuildBank.lua)
+				bankSnap = {},     -- foto del contenido del banco del juego: { tabs = { [n] = pestaña }, money } (BankVault.lua)
+				bankAsks = {},     -- [id] = petición de un miembro para sacar algo del banco (BankVault.lua)
 			},
 		},
 	},
@@ -595,6 +599,7 @@ function LG:Prune()
 		ns.PruneEvents(g)
 		ns.PruneAuctions(g)
 		if ns.PruneBankLog then ns.PruneBankLog(g) end
+		if ns.PruneBankAsks then ns.PruneBankAsks(g) end
 	end
 end
 

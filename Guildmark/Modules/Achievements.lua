@@ -89,7 +89,7 @@ end
 local function gatherFacts(g)
 	local f = {
 		kills = {}, revenges = {}, nemesis = {}, dungeonDays = {}, dungeonsSeen = {},
-		raidBosses = {}, orders = {}, events = {}, auctions = {},
+		raidBosses = {}, orders = {}, tippedOrders = {}, events = {}, auctions = {},
 	}
 	-- PvP
 	for _, k in pairs(g.kills) do
@@ -126,7 +126,10 @@ local function gatherFacts(g)
 	for _, b in pairs(firstBoss) do f.raidBosses[#f.raidBosses + 1] = b.t end
 	-- Artesanía, eventos y mercado
 	for _, o in pairs(g.orders) do
-		if o.status == "done" and not ns.IsVoided(g, o.id) then f.orders[#f.orders + 1] = o.updated or o.t end
+		if o.status == "done" and not ns.IsVoided(g, o.id) then
+			f.orders[#f.orders + 1] = o.updated or o.t
+			if o.tipPaid then f.tippedOrders[#f.tippedOrders + 1] = o.updated or o.t end
+		end
 	end
 	for id, list in pairs(g.attendance) do
 		local e = g.events[id]
@@ -138,7 +141,7 @@ local function gatherFacts(g)
 	end
 	for _, s in pairs(g.spends) do f.auctions[#f.auctions + 1] = s.t end
 
-	for _, key in ipairs({ "kills", "revenges", "dungeonDays", "raidBosses", "orders", "events", "auctions" }) do
+	for _, key in ipairs({ "kills", "revenges", "dungeonDays", "raidBosses", "orders", "tippedOrders", "events", "auctions" }) do
 		sortedTimes(f[key])
 	end
 	for guild, list in pairs(f.nemesis) do sortedTimes(list) end
@@ -286,6 +289,11 @@ local function gatherFacts(g)
 		if st.doneAt then f.bankRequests[#f.bankRequests + 1] = st.doneAt end
 	end
 	sortedTimes(f.bankRequests)
+	f.bankAsks = {}
+	for _, a in pairs(g.bankAsks or {}) do
+		if a.status == "done" then f.bankAsks[#f.bankAsks + 1] = a.updated or a.t end
+	end
+	sortedTimes(f.bankAsks)
 	f.bankItems = 0 -- depósitos de objetos (no unidades)
 	for _, d in pairs(g.bankLog or {}) do
 		if d.kind == "item" then f.bankItems = f.bankItems + 1 end
@@ -481,6 +489,8 @@ local ACH = {
 		desc = L["Entrega 10 encargos entre miembros de la hermandad."], eval = counter("orders", 10) },
 	{ id = "orders2", cat = "professions", name = L["Taller de hermandad"], icon = "Interface\\Icons\\Trade_BlackSmithing",
 		desc = L["Entrega 50 encargos entre miembros de la hermandad."], eval = counter("orders", 50) },
+	{ id = "ordersTip", cat = "professions", name = L["Artesanos bien pagados"], icon = "Interface\\Icons\\INV_Misc_Coin_02",
+		desc = L["Entrega 10 encargos con la propina pagada."], eval = counter("tippedOrders", 10) },
 	{ id = "orders3", cat = "professions", name = L["Gremio de artesanos"], icon = "Interface\\Icons\\Trade_BlackSmithing",
 		desc = L["Entrega 200 encargos entre miembros de la hermandad."], eval = counter("orders", 200) },
 	{ id = "skill1", cat = "professions", name = L["Trabajo en equipo"], icon = "Interface\\Icons\\Trade_Engineering",
@@ -541,6 +551,8 @@ local ACH = {
 		desc = L["Haced 100 depósitos de objetos en el banco de la hermandad."], eval = snapshot("bankItems", 100) },
 	{ id = "bankReq", cat = "community", name = L["Proveedores"], icon = "Interface\\Icons\\INV_Crate_01",
 		desc = L["Completad 5 pedidos del banco de la hermandad."], eval = counter("bankRequests", 5) },
+	{ id = "bankAsk", cat = "community", name = L["Intendencia"], icon = "Interface\\Icons\\INV_Misc_Bag_10_Blue",
+		desc = L["Entregad 10 peticiones del banco de la hermandad."], eval = counter("bankAsks", 10) },
 	{ id = "bank2", cat = "community", name = L["Arcas de oro"], icon = "Interface\\Icons\\INV_Misc_Coin_01",
 		desc = L["Depositad 1.000 de oro entre todos en el banco de la hermandad."], eval = snapshot("bankGold", 1000) },
 	-- Tienda

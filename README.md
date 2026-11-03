@@ -18,7 +18,7 @@ perfil con medallas y logros de hermandad con su propio nivel.
 - **Clasificación:** reputación, cazadores, recolectores, encargos, mazmorras y JcJ.
 - **Crónica:** mazmorras, bandas y eventos de la hermandad.
 - **Cofre:** las insignias de toda la hermandad. Se invierten en **proyectos** (el estandarte de la hermandad en el retrato de todos, o eventos con más insignias: mazmorras, campos de batalla, caza, artesanía…) y pagan los **pedidos del banco**.
-- **Banco de la hermandad:** las aportaciones de oro y objetos se registran solas al abrir el banco. Un oficial pide lo que hace falta («200 menas de cobre») y quien lo deposita cobra insignias del cofre.
+- **Banco de la hermandad:** sección propia con lo que hay dentro, como en el juego, para pedir objetos a los oficiales. Las aportaciones se registran solas y los oficiales piden lo que hace falta («200 menas de cobre»): quien lo deposita cobra insignias del cofre.
 
 **Eventos** con calendario mensual, inscripción por rol (tanque, sanador, DPS),
 recordatorios y asistencia confirmada sola si vas en grupo con la hermandad.
@@ -41,7 +41,7 @@ de hermandades con el addon, récords y Horda contra Alianza.
 **Mercado**
 - **Subasta con insignias** (nunca oro): cualquiera subasta lo suyo durante un día y cobra el 90 %; el 10 % va al cofre. Los oficiales subastan objetos del banco.
 - **Gremios:** el recetario de toda la hermandad por profesión y categoría.
-- **Encargos:** a un artesano o al gremio entero; el primero que acepta se lo queda. La entrega se detecta sola en el intercambio.
+- **Encargos:** a un artesano o al gremio entero; el primero que acepta se lo queda. Puedes poner tú los materiales (con la lista de la receta) y dejar propina; la entrega, los materiales y la propina se comprueban solos en el intercambio.
 - **Tienda:** marcos y terciopelos para tu perfil, y las tasas para fundar una tribu o cambiar su icono.
 
 **Perfil:** un estuche de medallas (bronce, plata y oro) por lo que haces por tu hermandad,
@@ -142,7 +142,7 @@ achievements with their own level.
 - **Ranking:** reputation, hunters, gatherers, orders, dungeons and PvP.
 - **Chronicle:** guild dungeons, raids and events.
 - **Chest:** the whole guild's badges. They fund **projects** (the guild standard on every portrait, or boosted events: dungeons, battlegrounds, hunting, crafting…) and pay for **bank requests**.
-- **Guild bank:** gold and item deposits are recorded automatically when the bank is opened. An officer asks for what is needed ("200 copper ore") and whoever deposits it gets badges from the chest.
+- **Guild bank:** its own section showing what is inside, laid out like the in-game bank, to request items from the officers. Deposits are recorded automatically and officers ask for what is needed ("200 copper ore"): whoever deposits it gets badges from the chest.
 
 **Events** with a monthly calendar, sign-up by role (tank, healer, DPS), reminders, and
 attendance confirmed automatically when you are grouped with the guild.
@@ -165,7 +165,7 @@ addon, records and Horde vs Alliance.
 **Market**
 - **Badge auction** (never gold): anyone can auction their own items for a day and gets 90%; 10% goes to the chest. Officers auction guild bank items.
 - **Crafters:** the whole guild's recipe book by profession and category.
-- **Orders:** to one crafter or to all of them; the first to accept takes it. Delivery is detected automatically in the trade window.
+- **Orders:** to one crafter or to all of them; the first to accept takes it. You can provide the materials (with the recipe list) and leave a tip; delivery, materials and tip are checked automatically in the trade window.
 - **Shop:** frames and velvets for your profile, plus the fees to found a tribe or change its icon.
 
 **Profile:** a medal case (bronze, silver and gold) for what you do for your guild, your

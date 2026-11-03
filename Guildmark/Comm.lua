@@ -190,6 +190,9 @@ function ns.ForgetMember(g, name, guid)
 	for id, p in pairs(g.purchases or {}) do
 		if p.member == name then g.purchases[id] = nil end
 	end
+	for id, a in pairs(g.bankAsks or {}) do
+		if a.requester == name then g.bankAsks[id] = nil end
+	end
 	for key, d in pairs(g.bankLog or {}) do
 		if d.member == name then g.bankLog[key] = nil end
 	end
@@ -292,6 +295,10 @@ ns.handlers.SYNC = withGuild(function(g, sender, data, distribution)
 	for _, rec in pairs(data.bankRequests or {}) do
 		if type(rec) == "table" then changed = ns.MergeBankRequest(g, rec) or changed end
 	end
+	for _, rec in pairs(data.bankAsks or {}) do
+		if type(rec) == "table" then changed = ns.MergeBankAsk(g, rec) or changed end
+	end
+	if type(data.bankSnap) == "table" then changed = ns.MergeBankSnapshot(g, data.bankSnap) or changed end
 	if type(data.bankLog) == "table" then
 		local list = {}
 		for _, rec in pairs(data.bankLog) do list[#list + 1] = rec end
@@ -428,6 +435,8 @@ ns.handlers.HELLO = function(sender, data, _, rawSender)
 			purchases = g.purchases,
 			bankLog = g.bankLog,
 			bankRequests = g.bankRequests,
+			bankAsks = g.bankAsks,
+			bankSnap = g.bankSnap,
 			lfg = g.lfg,
 			tribes = g.tribes,
 			tribeAccepts = g.tribeAccepts,

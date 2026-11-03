@@ -41,7 +41,7 @@ local function pickEnemy()
 end
 
 function ns.ClearTestData(g)
-	for _, tableName in ipairs({ "members", "kills", "runs", "orders", "events", "spends", "adjustments", "lfg", "tribes", "projects", "donations", "chestMoves", "bgMatches" }) do
+	for _, tableName in ipairs({ "members", "kills", "runs", "orders", "events", "spends", "adjustments", "lfg", "tribes", "projects", "donations", "chestMoves", "bgMatches", "bankAsks" }) do
 		for key, rec in pairs(g[tableName]) do
 			if type(rec) == "table" and rec.test then
 				g[tableName][key] = nil
@@ -52,6 +52,7 @@ function ns.ClearTestData(g)
 	for guild, t in pairs(g.targets) do
 		if t.test then g.targets[guild] = nil end
 	end
+	if g.bankSnap and g.bankSnap.test then g.bankSnap = { tabs = {} } end
 	for id, w in pairs(g.wars) do
 		if w.test then
 			g.wars[id] = nil
@@ -240,6 +241,26 @@ end
 
 -- Tribus y actividad: la tuya aprobada (con Draknar, Grumhal y Vexa), otra
 -- pendiente de aprobar, y un grupo de la tribu en una mazmorra ahora mismo.
+-- Banco: dos pestañas con materiales y consumibles, y una petición esperando oficial.
+local function fillBank(g, hunters, now, me)
+	local function tab(name, icon, items, ago)
+		local slots = {}
+		for i, it in ipairs(items) do slots[it[3] or i] = { id = it[1], n = it[2] } end
+		return { t = now - ago, by = hunters[1], name = name, icon = icon, slots = slots }
+	end
+	g.bankSnap = { test = true, money = { t = now - 3600, by = hunters[1], amount = 1254375 }, tabs = {
+		tab("Materiales", "Interface\\Icons\\INV_Fabric_Linen_01", {
+			{ 2589, 200 }, { 2589, 200 }, { 2589, 87 }, { 2592, 160 }, { 2592, 44 }, { 4306, 60 }, { 2770, 120 },
+			{ 2771, 80 }, { 2840, 40 }, { 2841, 20 }, { 2318, 140 }, { 2319, 75 }, { 2447, 60 }, { 765, 90 },
+			{ 785, 35 }, { 2450, 25 }, { 3820, 18 }, { 2452, 30 } }, 3600),
+		tab("Consumibles", "Interface\\Icons\\INV_Potion_51", {
+			{ 118, 20 }, { 858, 20 }, { 929, 15 }, { 2455, 20 }, { 4419, 5 }, { 1251, 40 }, { 2581, 20 }, { 6948, 1, 15 } }, 7200),
+	} }
+	local id = "test:ask:1"
+	g.bankAsks[id] = { id = id, test = true, t = now - 1800, requester = hunters[2], item = 4306, qty = 20,
+		note = "para la bolsa de tela de seda", status = "open", rev = 1, by = hunters[2], updated = now - 1800 }
+end
+
 local function fillTribes(g, hunters, now, me)
 	local function tribe(id, name, creator, members, status, accepted)
 		local set = {}
@@ -340,6 +361,7 @@ function ns.FillTestData()
 	fillWars(g, hunters, now, me)
 	fillPvE(g, hunters, now, me)
 	fillTribes(g, hunters, now, me)
+	fillBank(g, hunters, now, me)
 	LG:DataChanged()
 	LG:Print(L["Datos de ejemplo cargados en ~Pruebas: miembros, kills, mazmorras, bandas, encargos, eventos y subastas. Bórralos desde Oficial."])
 end

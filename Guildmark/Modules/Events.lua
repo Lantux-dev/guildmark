@@ -64,6 +64,7 @@ ns.PERMISSIONS = {
 	{ key = "bankAuction", label = L["Subastar objetos del banco"] },
 	{ key = "projects", label = L["Proyectos del cofre"] },
 	{ key = "bankRequests", label = L["Pedidos del banco"] },
+	{ key = "bankDeliver", label = L["Entregar objetos del banco"] },
 	{ key = "adjust", label = L["Ajustar puntos, anular registros y objetivos"] },
 }
 

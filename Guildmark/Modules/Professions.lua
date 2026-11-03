@@ -80,7 +80,7 @@ function Professions:ScanRecipes()
 		end
 	end
 
-	local ids, out, cat = {}, {}, {}
+	local ids, out, cat, mats = {}, {}, {}, {}
 	for _, recipeID in ipairs(api.GetAllRecipeIDs() or {}) do
 		local info = api.GetRecipeInfo(recipeID)
 		if info and info.learned then
@@ -96,13 +96,20 @@ function Professions:ScanRecipes()
 			-- Objeto que produce la receta: sirve para reconocer la entrega de un encargo.
 			local ok, output = pcall(api.GetRecipeOutputItemData, recipeID)
 			if ok and type(output) == "table" and output.itemID then out[recipeID] = output.itemID end
+			-- Materiales (solo los obligatorios), para que quien pide un encargo sepa qué traer.
+			local list = ns.ReadRecipeReagents and ns.ReadRecipeReagents(recipeID)
+			if list and #list > 0 then
+				local parts = {}
+				for _, r in ipairs(list) do parts[#parts + 1] = r.id .. ":" .. r.n end
+				mats[recipeID] = table.concat(parts, ",")
+			end
 		end
 	end
 	table.sort(ids)
 
 	local recipes = LG.db.char.recipes
 	local old = recipes[base.professionID]
-	local same = old and old.out and old.cat and #old.ids == #ids
+	local same = old and old.out and old.cat and old.mats and #old.ids == #ids
 	if same then
 		for i = 1, #ids do
 			if old.ids[i] ~= ids[i] then same = false break end
@@ -110,7 +117,7 @@ function Professions:ScanRecipes()
 	end
 	if same then return end
 
-	recipes[base.professionID] = { name = base.professionName, ids = ids, out = out, cat = cat, catNames = catNames, catOrder = catOrder, t = ns.Now() }
+	recipes[base.professionID] = { name = base.professionName, ids = ids, out = out, cat = cat, mats = mats, catNames = catNames, catOrder = catOrder, t = ns.Now() }
 	LG:Debug("recetas de", base.professionName, #ids)
 	self:UpdateProfessions()
 	LG:MarkDirty()
@@ -120,7 +127,7 @@ table.insert(ns.recordProviders, function(rec)
 	rec.prof = LG.db.char.professions
 	local recipes = {}
 	for id, r in pairs(LG.db.char.recipes) do
-		recipes[id] = { name = r.name, ids = r.ids, out = r.out, cat = r.cat, catNames = r.catNames, catOrder = r.catOrder }
+		recipes[id] = { name = r.name, ids = r.ids, out = r.out, cat = r.cat, mats = r.mats, catNames = r.catNames, catOrder = r.catOrder }
 	end
 	rec.recipes = recipes
 end)
@@ -203,6 +210,44 @@ end
 ---------------------------------------------------------------------------
 
 local spellNames = {}
+-- Materiales obligatorios de una receta según el juego: { { id, n } } o nil. Solo funciona
+-- con las recetas que el cliente conoce (las del propio personaje, o cualquiera si lo deja).
+function ns.ReadRecipeReagents(recipeID)
+	local api = C_TradeSkillUI and C_TradeSkillUI.GetRecipeSchematic
+	if not api then return nil end
+	local ok, schematic = pcall(api, recipeID, false)
+	if not ok or type(schematic) ~= "table" or type(schematic.reagentSlotSchematics) ~= "table" then return nil end
+	local basic = Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic
+	local list = {}
+	for _, slot in ipairs(schematic.reagentSlotSchematics) do
+		local first = type(slot.reagents) == "table" and slot.reagents[1]
+		local required = (basic == nil or slot.reagentType == nil or slot.reagentType == basic) and (slot.required ~= false)
+		if required and first and first.itemID and (tonumber(slot.quantityRequired) or 0) > 0 then
+			list[#list + 1] = { id = first.itemID, n = tonumber(slot.quantityRequired) }
+		end
+	end
+	return #list > 0 and list or nil
+end
+
+-- Materiales de una receta: los del juego si los sabe y, si no, los que compartió
+-- algún artesano de la hermandad que la tiene. { { id, n } } o nil.
+function ns.RecipeReagents(recipeID)
+	local list = ns.ReadRecipeReagents(recipeID)
+	if list then return list end
+	local g = LG:GuildData()
+	for _, m in pairs(g and g.members or {}) do
+		for _, r in pairs(m.recipes or {}) do
+			local text = type(r.mats) == "table" and r.mats[recipeID]
+			if type(text) == "string" then
+				list = {}
+				for id, n in text:gmatch("(%d+):(%d+)") do list[#list + 1] = { id = tonumber(id), n = tonumber(n) } end
+				if #list > 0 then return list end
+			end
+		end
+	end
+	return nil
+end
+
 function ns.RecipeName(id)
 	local name = spellNames[id]
 	if name == nil then

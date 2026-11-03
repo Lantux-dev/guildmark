@@ -6,7 +6,7 @@
 ## Author: Lantux
 ## X-License: GPL-3.0
 ## X-Donate: https://ko-fi.com/lantux
-## Version: 1.0.0
+## Version: 1.1.0
 ## SavedVariables: GuildmarkDB
 ## SavedVariablesPerCharacter: GuildmarkBackup
 ## IconTexture: Interface\AddOns\Guildmark\Media\emblem_small
@@ -35,6 +35,7 @@ Modules\Profile.lua
 Modules\Bounty.lua
 Modules\Shop.lua
 Modules\GuildBank.lua
+Modules\BankVault.lua
 Modules\Achievements.lua
 Modules\Legacy.lua
 Modules\Integrity.lua
@@ -53,6 +54,7 @@ Modules\Export.lua
 UI\Minimap.lua
 UI\InputDialog.lua
 UI\IconPicker.lua
+UI\BankView.lua
 UI\MainFrame.lua
 UI\Consent.lua
 UI\OrderDialog.lua

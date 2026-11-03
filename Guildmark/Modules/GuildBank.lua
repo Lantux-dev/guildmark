@@ -300,12 +300,12 @@ local function resolveItem(text)
 	text = text and strtrim(text) or ""
 	local id = tonumber(text:match("item:(%d+)")) or tonumber(text)
 	local link = text:match("(|c%x+|Hitem:.-|h.-|h|r)") or text:match("(|Hitem:.-|h.-|h)")
-	if not id and text ~= "" and GetItemInfo then
-		local ok, _, l = pcall(GetItemInfo, text)
+	if not id and text ~= "" and ns.GetItemInfo then
+		local ok, _, l = pcall(ns.GetItemInfo, text)
 		if ok and type(l) == "string" then id, link = tonumber(l:match("item:(%d+)")), l end
 	end
-	if id and not link and GetItemInfo then
-		local ok, _, l = pcall(GetItemInfo, id)
+	if id and not link and ns.GetItemInfo then
+		local ok, _, l = pcall(ns.GetItemInfo, id)
 		if ok and type(l) == "string" then link = l end
 	end
 	return id, link

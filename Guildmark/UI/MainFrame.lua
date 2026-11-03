@@ -22,7 +22,7 @@ local LG = ns.LG
 local frame, scroll, scrollChild, searchBox, searchHint, summary, subtitle, achButton, watermark
 local segmentButtons = {}
 local current = "home"
-local subview = { market = "auction", guild = "members", hunt = "targets", pve = "lfg", faction = "ranking" }
+local subview = { market = "auction", guild = "members", hunt = "targets", pve = "lfg", faction = "ranking", bank = "contents" }
 local expanded = {}
 local tabButtons = {}
 
@@ -125,6 +125,13 @@ local function qualityColor(itemID)
 	return nil
 end
 
+-- Piezas de las filas para otras vistas (UI/BankView.lua), que MainFrame va justo de variables locales.
+ns.RowKit = {
+	header = header, line = line, space = space, grey = grey, itemIcon = itemIcon, qualityColor = qualityColor,
+	search = function() return searchBox and searchBox:GetText() or "" end,
+	refresh = function() if ns.RefreshMainFrame then ns.RefreshMainFrame() end end,
+}
+
 -- Icono de una receta: el del objeto que fabrica si se conoce, si no el del hechizo.
 local function recipeIcon(recipeID, outputItemID)
 	if outputItemID then return itemIcon(outputItemID), qualityColor(outputItemID) end
@@ -197,6 +204,25 @@ local function orderRow(o, who, buttons)
 	local foot = { date("%d/%m %H:%M", o.t) }
 	if o.guild then foot[#foot + 1] = (L["al gremio de %s"]):format(o.skillLine and ns.ProfessionName(o.skillLine) or "?") end
 	if o.status == "done" and o.verified then foot[#foot + 1] = GREEN .. L["verificado por intercambio"] .. R end
+	if o.mats then
+		local progress = not o.matsIn and o.matsGot and ns.OrderMaterialsProgress(o)
+		if o.matsIn then
+			foot[#foot + 1] = GREEN .. L["materiales recibidos"] .. R
+		elseif progress then
+			-- Llegando por partes: cuánto hay de cada uno, lo que falta en rojo.
+			local parts = {}
+			for _, p in ipairs(progress) do
+				local name = ns.ItemName and ns.ItemName(p.id) or ("item:" .. p.id)
+				parts[#parts + 1] = (p.got >= p.need and GREEN or RED) .. ("%d/%d"):format(math.min(p.got, p.need), p.need) .. R .. " " .. name
+			end
+			foot[#foot + 1] = L["materiales:"] .. " " .. table.concat(parts, ", ")
+		else
+			foot[#foot + 1] = (L["materiales: los pone %s"]):format(ns.ShortName(o.requester) or "?")
+		end
+	end
+	if o.tip then
+		foot[#foot + 1] = (L["propina %s"]):format(ns.MoneyText(o.tip)) .. (o.tipPaid and (" " .. GREEN .. L["pagada"] .. R) or "")
+	end
 	if o.note then foot[#foot + 1] = "\"" .. o.note .. "\"" end
 	return {
 		kind = "card",
@@ -228,8 +254,16 @@ local function orderButtons(o, me)
 	if o.crafter == me then
 		if o.status == "open" then
 			return { { label = L["Aceptar"], onClick = setOrder(o.id, "accepted") }, { label = L["Rechazar"], onClick = setOrder(o.id, "declined") } }
-		elseif o.status == "accepted" then
-			return { { label = L["Entregado"], onClick = setOrder(o.id, "done") } }
+		elseif o.status == "accepted" or o.status == "done" then
+			-- Si el intercambio no lo detectó, el artesano confirma a mano lo que le han dado.
+			local list = o.status == "accepted" and { { label = L["Entregado"], onClick = setOrder(o.id, "done") } } or {}
+			if o.mats and not o.matsIn and o.status == "accepted" then
+				list[#list + 1] = { label = L["Materiales recibidos"], onClick = function() ns.MarkOrderReceived(o.id, "mats") end }
+			end
+			if o.tip and not o.tipPaid then
+				list[#list + 1] = { label = L["Propina recibida"], onClick = function() ns.MarkOrderReceived(o.id, "tip") end }
+			end
+			return #list > 0 and list or nil
 		end
 	elseif o.requester == me then
 		if o.status == "open" then
@@ -1149,69 +1183,10 @@ function chestUI.view(g, rows)
 		end
 	end
 
-	-- Banco de la hermandad del juego: quién aporta (lo leen los registros al abrir el banco).
-	local bankDonors = ns.BankDonors()
+	-- El banco del juego (contenido, peticiones, pedidos de depósito y registro) tiene su sección.
 	space(rows)
-	header(rows, L["Banco de la hermandad"])
-	if #bankDonors == 0 then
-		line(rows, grey(L["Todavía no hay aportaciones registradas. Se apuntan cuando alguien con el addon abre el banco (solo de quien comparte sus datos)."]), 1)
-	end
-	for i = 1, math.min(5, #bankDonors) do
-		local d = bankDonors[i]
-		local m = g.members[d.name] or ns.roster[d.name]
-		line(rows, ("%s  %s  %s  %s"):format(GOLD .. i .. "." .. R, ns.ClassColorName(d.name, m and m.class),
-			d.gold > 0 and ns.MoneyText(d.gold) or "", d.items > 0 and grey((L["%d objetos"]):format(d.items)) or ""), 1)
-	end
-	if #bankDonors > 0 then
-		for _, d in ipairs(ns.BankRecent(5)) do
-			line(rows, grey(date("%d/%m %H:00", d.t)) .. "  " .. ns.ShortName(d.member) .. "  "
-				.. (d.kind == "money" and ns.MoneyText(d.amount) or ((d.link or "?") .. (d.amount > 1 and (" x" .. d.amount) or ""))), 2)
-		end
-	end
-	line(rows, grey((L["El oro da reputación (lo neto de la semana, hasta %d), nunca insignias. Los objetos solo cuentan si los pide un pedido."]):format(ns.BANK_REP.weekCap)), 1)
-
-	-- Pedidos del banco: lo que la hermandad necesita, con su recompensa del cofre.
-	space(rows)
-	local canRequest = ns.CanRequestBank(me)
-	header(rows, L["Pedidos del banco"], canRequest and { { label = L["Nuevo pedido"], onClick = function()
-		ns.ShowInputDialog({
-			title = L["Nuevo pedido del banco"],
-			text = (L["Quien deposite ese objeto en los próximos %d días cobra su parte de la recompensa, que sale del cofre (%d insignias libres). Mayúsculas + clic en un objeto lo pone en el campo."]):format(
-				ns.BANK_REQUEST.days, math.max(0, ns.ChestState().balance - ns.BankRequestsReserved())),
-			submit = L["Pedir"],
-			fields = {
-				{ key = "item", label = L["Objeto"], width = 260 },
-				{ key = "qty", label = L["Cantidad"], width = 70, numeric = true, default = 20 },
-				{ key = "reward", label = L["Recompensa (insignias)"], width = 70, numeric = true, default = 20 },
-			},
-			onSubmit = function(v)
-				local ok, err = ns.CreateBankRequest(v.item, v.qty, v.reward)
-				if not ok then return err end
-			end,
-		})
-	end } } or nil)
-	local openReqs, closedReqs = ns.BankRequestLists()
-	if #openReqs == 0 then line(rows, grey(L["Ningún pedido abierto."]), 1) end
-	for _, item in ipairs(openReqs) do
-		local r = item.r
-		local canCancel = r.creator == me or ns.Can("bankRequests", me)
-		rows[#rows + 1] = {
-			kind = "card", state = "normal", accent = ns.ACCENT.action, link = r.link,
-			icon = itemIcon(r.item) or "Interface\\Icons\\INV_Misc_QuestionMark", iconColor = qualityColor(r.item),
-			title = r.link or "?",
-			desc = (L["%d de %d entregados"]):format(item.delivered, r.qty),
-			status = GOLD .. (L["%d insignias"]):format(r.reward) .. R,
-			foot = grey((L["pedido por %s  ·  caduca en %s"]):format(ns.ShortName(r.creator), ns.FormatDuration(r.ends - ns.Now()))),
-			buttons = canCancel and { { label = L["Cancelar"], onClick = function() ns.CancelBankRequest(r.id) end } } or nil,
-		}
-		rows[#rows + 1] = { kind = "bar", indent = 1, label = L["Entregado"], value = item.delivered, max = r.qty,
-			text = ("%d / %d"):format(item.delivered, r.qty) }
-	end
-	for i = 1, math.min(3, #closedReqs) do
-		local item = closedReqs[i]
-		local label = item.phase == "done" and (GREEN .. L["completado"] .. R) or grey(item.phase == "cancelled" and L["cancelado"] or L["caducado"])
-		line(rows, ("%s  %s  %d/%d  %s"):format(item.r.link or "?", label, item.delivered, item.r.qty, grey(ns.ShortName(item.r.creator))), 1)
-	end
+	line(rows, grey(L["El banco de la hermandad del juego (lo que hay dentro, peticiones y pedidos de depósito) está en la sección Banco."]), 1, {
+		buttons = { { label = L["Ir al banco"], onClick = function() ns.SelectTab("bank") end } } })
 
 	-- Catálogo: los tipos que se pueden abrir (uno de cada a la vez).
 	space(rows)
@@ -1265,6 +1240,78 @@ function chestUI.view(g, rows)
 		space(rows)
 		line(rows, grey((L["Proyectos cancelados: %d (lo reunido volvió al cofre)."]):format(#lists.cancelled)), 1)
 	end
+end
+
+-- Banco › Registro: quién aporta al banco del juego (lo leen los registros al abrirlo).
+function ns.BankLogView(g, rows)
+	local me = ns.PlayerFullName()
+	-- Banco de la hermandad del juego: quién aporta (lo leen los registros al abrir el banco).
+	local bankDonors = ns.BankDonors()
+	header(rows, L["Aportaciones al banco"])
+	if #bankDonors == 0 then
+		line(rows, grey(L["Todavía no hay aportaciones registradas. Se apuntan cuando alguien con el addon abre el banco (solo de quien comparte sus datos)."]), 1)
+	end
+	for i = 1, math.min(5, #bankDonors) do
+		local d = bankDonors[i]
+		local m = g.members[d.name] or ns.roster[d.name]
+		line(rows, ("%s  %s  %s  %s"):format(GOLD .. i .. "." .. R, ns.ClassColorName(d.name, m and m.class),
+			d.gold > 0 and ns.MoneyText(d.gold) or "", d.items > 0 and grey((L["%d objetos"]):format(d.items)) or ""), 1)
+	end
+	if #bankDonors > 0 then
+		for _, d in ipairs(ns.BankRecent(5)) do
+			line(rows, grey(date("%d/%m %H:00", d.t)) .. "  " .. ns.ShortName(d.member) .. "  "
+				.. (d.kind == "money" and ns.MoneyText(d.amount) or ((d.link or "?") .. (d.amount > 1 and (" x" .. d.amount) or ""))), 2)
+		end
+	end
+	line(rows, grey((L["El oro da reputación (lo neto de la semana, hasta %d), nunca insignias. Los objetos solo cuentan si los pide un pedido."]):format(ns.BANK_REP.weekCap)), 1)
+
+end
+
+-- Banco › Pedidos de depósito: lo que la hermandad necesita, con su recompensa del cofre.
+function ns.BankRequestsView(g, rows)
+	local me = ns.PlayerFullName()
+	-- Pedidos del banco: lo que la hermandad necesita, con su recompensa del cofre.
+	local canRequest = ns.CanRequestBank(me)
+	header(rows, L["Pedidos del banco"], canRequest and { { label = L["Nuevo pedido"], onClick = function()
+		ns.ShowInputDialog({
+			title = L["Nuevo pedido del banco"],
+			text = (L["Quien deposite ese objeto en los próximos %d días cobra su parte de la recompensa, que sale del cofre (%d insignias libres). Mayúsculas + clic en un objeto lo pone en el campo."]):format(
+				ns.BANK_REQUEST.days, math.max(0, ns.ChestState().balance - ns.BankRequestsReserved())),
+			submit = L["Pedir"],
+			fields = {
+				{ key = "item", label = L["Objeto"], width = 260 },
+				{ key = "qty", label = L["Cantidad"], width = 70, numeric = true, default = 20 },
+				{ key = "reward", label = L["Recompensa (insignias)"], width = 70, numeric = true, default = 20 },
+			},
+			onSubmit = function(v)
+				local ok, err = ns.CreateBankRequest(v.item, v.qty, v.reward)
+				if not ok then return err end
+			end,
+		})
+	end } } or nil)
+	local openReqs, closedReqs = ns.BankRequestLists()
+	if #openReqs == 0 then line(rows, grey(L["Ningún pedido abierto."]), 1) end
+	for _, item in ipairs(openReqs) do
+		local r = item.r
+		local canCancel = r.creator == me or ns.Can("bankRequests", me)
+		rows[#rows + 1] = {
+			kind = "card", state = "normal", accent = ns.ACCENT.action, link = r.link,
+			icon = itemIcon(r.item) or "Interface\\Icons\\INV_Misc_QuestionMark", iconColor = qualityColor(r.item),
+			title = r.link or "?",
+			desc = (L["%d de %d entregados"]):format(item.delivered, r.qty),
+			status = GOLD .. (L["%d insignias"]):format(r.reward) .. R,
+			foot = grey((L["pedido por %s  ·  caduca en %s"]):format(ns.ShortName(r.creator), ns.FormatDuration(r.ends - ns.Now()))),
+			buttons = canCancel and { { label = L["Cancelar"], onClick = function() ns.CancelBankRequest(r.id) end } } or nil,
+		}
+		rows[#rows + 1] = { kind = "bar", indent = 1, label = L["Entregado"], value = item.delivered, max = r.qty,
+			text = ("%d / %d"):format(item.delivered, r.qty) }
+	end
+	for i = 1, math.min(3, #closedReqs) do
+		local item = closedReqs[i]
+		local label = item.phase == "done" and (GREEN .. L["completado"] .. R) or grey(item.phase == "cancelled" and L["cancelado"] or L["caducado"])
+		line(rows, ("%s  %s  %d/%d  %s"):format(item.r.link or "?", label, item.delivered, item.r.qty, grey(ns.ShortName(item.r.creator))), 1)
+	end
+
 end
 
 -- Mercado › Tienda: cosméticos del perfil (comprar y usar) y las tasas de las tribus.
@@ -2439,6 +2486,17 @@ function ranksUI.view(rows)
 			buttons = stepper(function() return ns.PermissionRank(perm.key) end, function(v) ns.SetGuildSetting("perm:" .. perm.key, v) end),
 		})
 	end
+	-- Pestañas del banco: hasta qué rango las ve cada una en el addon (las que ya tienen foto).
+	local snap = LG:GuildData().bankSnap
+	for n = 1, 8 do
+		local tab = snap and snap.tabs and snap.tabs[n]
+		if tab then
+			line(rows, (L["Pestaña del banco «%s»: %s"]):format(tab.name or n, GOLD .. upTo(ns.BankTabMaxRank(n)) .. R), 1, {
+				buttons = stepper(function() return ns.BankTabMaxRank(n) end, function(v) ns.SetGuildSetting("bankTab:" .. n, v) end),
+				tooltip = { L["Pestañas del banco"], L["Qué rangos ven esta pestaña en Guildmark. Ponlo igual que en el banco del juego: si no, quien abra el banco con más permisos la enseñaría a todos."] },
+			})
+		end
+	end
 	-- Rangos del addon (se ganan con reputación): nombres a gusto de la hermandad.
 	ns.ApplyRankNames()
 	for _, r in ipairs(ns.MERIT_RANKS) do
@@ -3420,7 +3478,7 @@ end
 
 local CAL_W, CAL_H, CAL_GAP = 94, 50, 3 -- celdas del calendario (7 × 94 + huecos caben en 690)
 local CAL_TOP = 58                       -- barra del mes + nombres de los días
-local HEIGHTS = { header = 26, row = 20, bar = 20, space = 8, tall = 32, calendar = CAL_TOP + 6 * (CAL_H + CAL_GAP) + 4 }
+local HEIGHTS = { header = 26, row = 20, bar = 20, space = 8, tall = 32, calendar = CAL_TOP + 6 * (CAL_H + CAL_GAP) + 4, bankgrid = ns.BANKGRID_HEIGHT or 360 }
 local rowPool = {}
 
 ---------------------------------------------------------------------------
@@ -3934,7 +3992,8 @@ local function layoutRow(row, spec)
 
 	-- El calendario ocupa la fila entera con sus propias celdas.
 	if row.cal then row.cal:SetShown(kind == "calendar") end
-	if kind == "calendar" then
+	if row.bankGrid then row.bankGrid:SetShown(kind == "bankgrid") end
+	if kind == "calendar" or kind == "bankgrid" then
 		row.text:Hide()
 		for _, fs in ipairs(row.cells) do fs:Hide() end
 		for _, btn in ipairs(row.buttons) do btn:Hide() end
@@ -3943,7 +4002,7 @@ local function layoutRow(row, spec)
 		row:SetScript("OnEnter", nil)
 		row:SetScript("OnLeave", nil)
 		row:EnableMouse(false)
-		layoutCalendar(row, spec)
+		if kind == "bankgrid" then ns.LayoutBankGrid(row, spec) else layoutCalendar(row, spec) end
 		return
 	end
 
@@ -4372,6 +4431,15 @@ views.faction = function()
 	return rows
 end
 
+views.bank = function()
+	local g = LG:GuildData()
+	if not g then return notInGuild() end
+	local rows = {}
+	segments(rows, "bank", ns.BankSegments())
+	ns.BankView(g, rows, subview.bank)
+	return rows
+end
+
 local SECTIONS = {
 	{ key = "home", label = L["Inicio"], icon = ns.MEDIA .. "emblem_small", noCrop = true },
 	{ key = "events", label = L["Eventos"], icon = "Interface\\Icons\\INV_Misc_PocketWatch_01" },
@@ -4380,6 +4448,7 @@ local SECTIONS = {
 	{ key = "faction", label = L["Facción"], icon = "Interface\\Icons\\INV_BannerPVP_01" },
 	{ key = "market", label = L["Mercado"], icon = "Interface\\Icons\\INV_Misc_Coin_02" },
 	{ key = "guild", label = L["Hermandad"], icon = "Interface\\Icons\\INV_BannerPVP_02" },
+	{ key = "bank", label = L["Banco"], icon = "Interface\\Icons\\INV_Misc_Bag_10_Blue" },
 	{ key = "officer", label = L["Oficial"], icon = "Interface\\Icons\\INV_Crown_01", officer = true },
 }
 
@@ -4536,6 +4605,17 @@ end
 local function layoutNav(segments)
 	local me = ns.PlayerFullName()
 	local isOfficer = LG:GuildName() ~= nil and ns.CanManageEvents(me)
+	-- Con muchas secciones y una desplegada, el menú no cabe encima de Logros y Ajustes:
+	-- se aprietan los botones (y luego los huecos) hasta que quepa.
+	local count = 0
+	for _, s in ipairs(SECTIONS) do if not s.officer or isOfficer then count = count + 1 end end
+	local nSub = #(segments or {})
+	local mainH, subH, mainGap, subGap = NAV_BUTTON_H, SUB_BUTTON_H, 4, 2
+	local avail = (frame.nav:GetHeight() or (FRAME_H - 90)) - (2 * NAV_BUTTON_H + 26)
+	local function needed() return 4 + count * (mainH + mainGap) + nSub * (subH + subGap) + (nSub > 0 and 4 or 0) end
+	while needed() > avail and mainH > 26 do mainH = mainH - 1 end
+	while needed() > avail and subH > 18 do subH = subH - 1 end
+	if needed() > avail then mainGap, subGap = 2, 1 end
 	local y = -4
 	local sub = 0
 	for _, s in ipairs(SECTIONS) do
@@ -4546,11 +4626,12 @@ local function layoutNav(segments)
 			local selected = s.key == current
 			b:ClearAllPoints()
 			b:SetPoint("TOPLEFT", 4, y)
+			b:SetHeight(mainH)
 			setArt(b.bg, selected and "Legacy-Challenge-Left-Sub-Tab-selected" or "Legacy-Challenge-Left-Sub-Tab",
 				selected and 0.3 or 0.12, selected and 0.24 or 0.1, selected and 0.1 or 0.08, 0.95)
 			b.label:SetText((selected and "|cffffffff" or GOLD) .. s.label .. R)
 			b.count:SetText(sectionBadge(s.key) or "")
-			y = y - NAV_BUTTON_H - 4
+			y = y - mainH - mainGap
 			if selected then
 				for _, seg in ipairs(segments or {}) do
 					sub = sub + 1
@@ -4561,6 +4642,7 @@ local function layoutNav(segments)
 					end
 					sb:ClearAllPoints()
 					sb:SetPoint("TOPLEFT", 24, y + 2)
+					sb:SetHeight(subH)
 					setArt(sb.bg, seg.selected and "Legacy-Challenge-Left-Sub-Tab-selected" or "Legacy-Challenge-Left-Sub-Tab",
 						0.1, 0.08, 0.06, seg.selected and 0.95 or 0.6)
 					sb.bg:SetAlpha(seg.selected and 1 or 0.55)
@@ -4568,7 +4650,7 @@ local function layoutNav(segments)
 					sb.count:SetText("")
 					sb:SetScript("OnClick", seg.onClick)
 					sb:Show()
-					y = y - SUB_BUTTON_H - 2
+					y = y - subH - subGap
 				end
 				y = y - 4
 			end

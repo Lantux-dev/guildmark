@@ -1,5 +1,29 @@
 # Cambios · Changelog
 
+## 1.1.0 · 2026-11
+
+- **Nuevo: sección Banco.** Lo que hay de verdad en el banco de la hermandad, como se ve en el juego (pestañas, huecos, cantidades y oro). Se actualiza cada vez que alguien con el addon abre el banco. El maestro decide en Ajustes qué rangos ven cada pestaña.
+- **Peticiones al banco:** clic en un objeto para pedirlo. Llega a quien tenga el permiso nuevo «Entregar objetos del banco»; la retirada se comprueba con el registro del banco y la entrega con el intercambio (o se marca a mano).
+- Los pedidos de depósito y el registro de aportaciones pasan del cofre a la sección Banco.
+- **Encargos:** casilla «Pongo yo los materiales» con la lista de lo que pide la receta, y propina en oro, plata y cobre. El addon cuenta en el intercambio lo que llega (2/2, 0/1…) y si la propina está pagada.
+- Logros nuevos: «Intendencia» y «Artesanos bien pagados».
+- Arreglado: nombres de objetos que salían como número (en Forever cambió la función del juego para leerlos).
+- El menú lateral se ajusta para no pisar Logros y Ajustes cuando una sección tiene muchos apartados.
+
+Es la primera versión del banco: con hermandades grandes y muchas pestañas aún no está probado del todo. Si algo falla, `/gmk errores` y cuéntanoslo.
+
+---
+
+- **New: Bank section.** What is really inside the guild bank, laid out like the in-game bank (tabs, slots, stacks and gold). It updates every time someone with the addon opens the bank. The guild master chooses in Settings which ranks see each tab.
+- **Bank requests:** click an item to request it. It goes to whoever has the new «Hand out bank items» permission; the withdrawal is checked against the bank log and the hand-over in the trade window (or marked manually).
+- Deposit requests and the contribution log move from the chest to the Bank section.
+- **Orders:** «I'll provide the materials» checkbox with the recipe's reagent list, and a tip in gold, silver and copper. The addon counts what arrives in trades (2/2, 0/1…) and whether the tip was paid.
+- New achievements: «Quartermasters» and «Well-Paid Crafters».
+- Fixed: item names showing as numbers (Forever changed the game function that reads them).
+- The side menu shrinks so it no longer covers Achievements and Settings when a section has many tabs.
+
+This is the first bank release: large guilds with many tabs are not fully tested yet. If something breaks, `/gmk errors` and tell us.
+
 ## 1.0.0 · 2026-10
 
 Primera versión estable, ya pública para todo el mundo.
