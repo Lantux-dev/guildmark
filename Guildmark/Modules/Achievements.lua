@@ -653,6 +653,26 @@ ns.handlers.ACH = function(sender, rec)
 	end
 end
 
+-- Aviso en el chat de hermandad: todos los addons ven el logro a la vez, así que cada uno
+-- espera un poco al azar y el primero avisa a los demás (ACHANN) de que ya lo ha escrito.
+local announced = {} -- [id] = true: ya anunciado por alguien
+
+ns.handlers.ACHANN = function(sender, rec)
+	if type(rec) == "table" and type(rec.id) == "string" then announced[rec.id] = true end
+end
+
+local function announce(entry, level)
+	local id = entry.def.id
+	Achievements:ScheduleTimer(function()
+		if announced[id] then return end
+		announced[id] = true
+		LG:Send("ACHANN", { id = id })
+		local text = (L["Logro de hermandad: «%s»."]):format(entry.def.name)
+		if level then text = text .. " " .. (L["¡La hermandad sube a nivel %d!"]):format(level) end
+		ns.GuildAnnounce(text)
+	end, 1 + math.random() * 6)
+end
+
 -- Título y emblema dorado (lo que pinta la cabecera de la ventana).
 function ns.AchievementRewards()
 	local perks = ns.GuildPerks()
@@ -666,19 +686,25 @@ function Achievements:Check()
 	ns.InvalidateAchievements()
 	local state = ns.AchievementState()
 	local now = ns.Now()
-	local newOnes = {}
+	local newOnes, newPoints = {}, 0
 	for _, entry in ipairs(state.list) do
 		if entry.done and not g.achievements[entry.def.id] then
 			local t = entry.doneAt or now
 			g.achievements[entry.def.id] = { t = t }
 			LG:Send("ACH", { id = entry.def.id, t = t })
+			if not entry.def.feat then newPoints = newPoints + 1 end
 			if now - t <= TOAST_WINDOW then newOnes[#newOnes + 1] = entry end
 		end
 	end
 	if #newOnes > 0 then
 		ns.InvalidateAchievements()
-		for i = 1, math.min(3, #newOnes) do
+		-- Subida de nivel: va en el aviso del último logro anunciado.
+		local level = ns.GuildLevel(state.points)
+		local levelUp = level > ns.GuildLevel(state.points - newPoints) and level or nil
+		local shown = math.min(3, #newOnes)
+		for i = 1, shown do
 			if ns.ShowAchievementToast then ns.ShowAchievementToast(newOnes[i]) end
+			announce(newOnes[i], i == shown and levelUp or nil)
 		end
 		LG:DataChanged()
 	end

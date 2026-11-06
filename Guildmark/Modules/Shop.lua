@@ -5,7 +5,8 @@
 --
 -- Una compra (BUY) solo vale si en ese momento tenías las insignias: se
 -- resuelve al recorrer el libro de puntos (Merits.lua), igual en todos los
--- addons. La tasa de una tribu que un oficial rechaza no se cobra.
+-- addons. La tasa de una tribu se reparte entre sus fundadores (Merits.lua) y,
+-- si un oficial la rechaza, no se cobra.
 local _, ns = ...
 local L = ns.L
 local LG = ns.LG
@@ -26,8 +27,8 @@ ns.SHOP_ITEMS = {
 		icon = "Interface\\Icons\\INV_Fabric_Felcloth_01", desc = L["Fondo negro para tu estuche de medallas."] },
 	{ key = "velvet_purple", short = L["Púrpura"], kind = "velvet", price = 150, label = L["Terciopelo púrpura"], color = { 0.15, 0.04, 0.2 },
 		icon = "Interface\\Icons\\INV_Fabric_Silk_02", desc = L["Fondo púrpura real para tu estuche de medallas."] },
-	{ key = "tribeCreate", kind = "fee", price = 100, label = L["Fundar una tribu"],
-		icon = "Interface\\Icons\\Spell_Holy_PrayerOfFortitude", desc = L["Se paga al proponerla; si un oficial la rechaza, no se cobra."] },
+	{ key = "tribeCreate", kind = "fee", price = 50, label = L["Fundar una tribu"],
+		icon = "Interface\\Icons\\Spell_Holy_PrayerOfFortitude", desc = L["Se reparte entre los fundadores: cada uno paga su parte al aceptar. Si un oficial la rechaza, no se cobra."] },
 	{ key = "tribeIcon", kind = "fee", price = 50, label = L["Icono de tribu"],
 		icon = "Interface\\Icons\\INV_Misc_Note_02", desc = L["Cambiar el icono de tu tribu por uno elegido."] },
 }

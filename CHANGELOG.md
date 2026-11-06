@@ -1,5 +1,23 @@
 # Cambios · Changelog
 
+## 1.1.1 · 2026-11
+
+- **Arreglado: las bajas y mazmorras de los demás no llegaban.** Al entrar, el addon pedía solo lo posterior a su último registro, así que una baja tuya reciente tapaba las de los demás de antes. Ahora pide lo que le falta de cada miembro. Funciona del todo cuando quien te contesta también tiene la 1.1.1: actualizad todos.
+- **Bajas con honor:** cualquier baja que te dé honor vale 5 insignias. Las de jugadores grises siguen sin dar nada.
+- **Las venganzas pagan siempre:** matar a quien acaba de matar a un compañero da 10 insignias + 5 de venganza, aunque no tenga hermandad o su hermandad no sea objetivo.
+- **Tribus más baratas:** fundar una cuesta 50 insignias repartidas entre los fundadores; cada uno paga su parte al aceptar. Quien pagó 100 recupera la diferencia.
+- **Avisos nuevos en el chat de hermandad:** logros de hermandad, subidas de nivel de hermandad y rangos de profesión (Oficial, Experto, Artesano…).
+- **Escape cierra la ventana** de Guildmark (en combate no: ahí, la X).
+
+---
+
+- **Fixed: other members' kills and dungeons weren't arriving.** On login the addon only asked for records newer than its latest one, so a recent kill of yours hid everyone else's earlier ones. It now asks for what it's missing from each member. It fully works once whoever answers you also has 1.1.1: everyone should update.
+- **Honorable kills:** any kill that gives you honor is worth 5 badges. Grey players still give nothing.
+- **Revenge always pays:** killing whoever just killed a guildmate gives 10 badges + 5 for revenge, even if they have no guild or their guild isn't a target.
+- **Cheaper tribes:** founding one costs 50 badges split between the founders; each pays their share when accepting. Anyone who paid 100 gets the difference back.
+- **New guild chat announcements:** guild achievements, guild level-ups and profession ranks (Journeyman, Expert, Artisan…).
+- **Escape closes the Guildmark window** (not in combat: use the X there).
+
 ## 1.1.0 · 2026-11
 
 - **Nuevo: sección Banco.** Lo que hay de verdad en el banco de la hermandad, como se ve en el juego (pestañas, huecos, cantidades y oro). Se actualiza cada vez que alguien con el addon abre el banco. El maestro decide en Ajustes qué rangos ven cada pestaña.

@@ -30,7 +30,8 @@ local POINTS = {
 	},
 	dungeonFull = { rep = 10, merits = 10 },    -- grupo 5/5 de hermandad
 	dungeonPartial = { rep = 5, merits = 5 },   -- grupo 4/5
-	huntKill = { rep = 5, merits = 10 },        -- kill de una hermandad objetivo
+	huntKill = { rep = 5, merits = 10 },        -- kill de una hermandad objetivo, o venganza
+	honorKill = { rep = 2, merits = 5 },        -- cualquier otra kill que dé honor
 	revengeBonus = { rep = 0, merits = 5 },
 	order = { rep = 5, merits = 5 },            -- encargo entregado (para el artesano)
 	aidHelp = { rep = 5, merits = 10 },         -- cada kill en la llamada de auxilio o el asalto de otra hermandad (tope por llamada)
@@ -162,15 +163,18 @@ local function collectEntries(g)
 		add(b.r.t, b.member, "dungeons", pts, (L["%s (%d/5 de hermandad)"]):format(b.r.instance or "?", b.r.guildCount), nil, "dungeons")
 	end
 
-	-- Cazarrecompensas: kills honorables de hermandades objetivo.
+	-- Cazarrecompensas: kills honorables de hermandades objetivo, y venganzas siempre
+	-- (quien acaba de matar a un compañero cuenta como presa aunque no tenga hermandad).
+	-- El resto de kills, solo si dieron honor: matar a alguien de nivel bajo no da nada.
 	local kills = {}
 	for _, k in pairs(g.kills) do
-		if k.kind == "kill" and k.honorable and k.guild and k.killerName and not k.bg and not ns.IsVoided(g, k.id) then kills[#kills + 1] = k end
+		if k.kind == "kill" and k.honorable and k.killerName and not k.bg and not ns.IsVoided(g, k.id) then kills[#kills + 1] = k end
 	end
 	table.sort(kills, function(a, b) return a.t < b.t end)
 	local sameVictim = {}
 	for _, k in ipairs(kills) do
-		if targetGuildsAt(g, k.t)[k.guild] then
+		local hunt = k.revenge or (k.guild and targetGuildsAt(g, k.t)[k.guild])
+		if hunt or (tonumber(k.honor) or 0) > 0 then
 			local key = ("%s|%s|%d"):format(k.killerName, k.victim or k.victimName or "?", dayIndex(k.t))
 			sameVictim[key] = (sameVictim[key] or 0) + 1
 			local factor = SAME_VICTIM_FACTOR[sameVictim[key]] or 0
@@ -178,7 +182,9 @@ local function collectEntries(g)
 				-- Botín de guerra (Bounty.lua): x1,5 cazando, también en el tope.
 				local wager = ns.InWager and ns.InWager(k.killerName, k.t) and ns.WAGER.bonus or nil
 				local suffix = wager and ("  " .. L["(botín de guerra)"]) or ""
-				add(k.t, k.killerName, "pvp", POINTS.huntKill, (L["Caza: %s <%s>"]):format(ns.ShortName(k.victimName) or "?", k.guild) .. suffix, factor * (wager or 1), "hunt")
+				local pts, label = POINTS.honorKill, (L["Baja con honor: %s"]):format(ns.ShortName(k.victimName) or "?")
+				if hunt then pts, label = POINTS.huntKill, (k.guild and (L["Caza: %s <%s>"]):format(ns.ShortName(k.victimName) or "?", k.guild) or (L["Caza: %s"]):format(ns.ShortName(k.victimName) or "?")) end
+				add(k.t, k.killerName, "pvp", pts, label .. suffix, factor * (wager or 1), "hunt")
 				if wager then entries[#entries].capBoost = (entries[#entries].capBoost or 1) * wager end
 				if k.revenge then
 					add(k.t, k.killerName, "pvp", POINTS.revengeBonus, L["Venganza"] .. suffix, wager, "hunt")
@@ -312,11 +318,29 @@ local function collectEntries(g)
 	end
 
 	-- Tienda (Shop.lua): solo cuenta si en ese momento había insignias para pagarlo.
+	-- La tasa de fundar una tribu no sale de las compras: se reparte entre los fundadores (abajo).
 	for id, p in pairs(g.purchases or {}) do
 		local item = ns.ShopItem and ns.ShopItem(p.item)
-		if item and not ns.IsVoided(g, id) and ns.PurchaseCharged(g, p) then
+		if item and p.item ~= "tribeCreate" and not ns.IsVoided(g, id) and ns.PurchaseCharged(g, p) then
 			entries[#entries + 1] = { t = p.t, member = p.member, special = "buy", rep = 0, merits = 0, amount = item.price,
 				item = p.item, own = item.kind ~= "fee", reason = (L["Tienda: %s"]):format(item.label) }
+		end
+	end
+
+	-- Fundar una tribu: cada fundador paga su parte (redondeada hacia arriba) al aceptar;
+	-- quien la propone, al proponerla. Una tribu rechazada no cobra a nadie.
+	local fee = ns.ShopItem and ns.ShopItem("tribeCreate")
+	for id, tribe in pairs(fee and g.tribes or {}) do
+		if tribe.status ~= "rejected" and type(tribe.members) == "table" then
+			local share = ns.TribeFeeShare(tribe)
+			local accepts = g.tribeAccepts[id] or {}
+			for name in pairs(tribe.members) do
+				local t = name == tribe.creator and tribe.t or accepts[name]
+				if t then
+					entries[#entries + 1] = { t = t, member = name, special = "buy", rep = 0, merits = 0, amount = share,
+						item = "tribeCreate", reason = (L["Tienda: %s"]):format(fee.label) .. " «" .. (tribe.name or "?") .. "»" }
+				end
+			end
 		end
 	end
 

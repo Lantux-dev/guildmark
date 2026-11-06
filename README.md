@@ -65,8 +65,8 @@ El addon usa los rangos de tu hermandad. El maestro de la hermandad decide en Aj
 rango puede crear eventos, subastar objetos del banco, abrir proyectos, hacer pedidos y
 ajustar puntos, y puede renombrar los rangos del addon (Recluta, Miembro, Veterano, Élite).
 
-Las novedades (subastas, pedidos, proyectos, eventos, tribus, cabezas con precio) se
-anuncian en el **chat de hermandad**, para que las vean también quienes no tienen el addon.
+Las novedades (subastas, pedidos, proyectos, eventos, tribus, cabezas con precio, logros y
+nivel de hermandad, rangos de profesión) se anuncian en el **chat de hermandad**, para que las vean también quienes no tienen el addon.
 
 ## Cómo funciona
 
@@ -189,7 +189,8 @@ The addon uses your guild's ranks. In Settings, the guild master decides which r
 create events, auction bank items, open projects, make bank requests and adjust points, and
 can rename the addon ranks (Recruit, Member, Veteran, Elite).
 
-News (auctions, requests, projects, events, tribes, bounties) is announced in **guild chat**,
+News (auctions, requests, projects, events, tribes, bounties, guild achievements and levels,
+profession ranks) is announced in **guild chat**,
 so members without the addon see it too.
 
 ## How it works

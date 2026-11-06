@@ -377,26 +377,46 @@ function ns.ProposeTribe(name, members)
 		local other = ns.TribeOf(m)
 		if other then return (L["%s ya pertenece a «%s»."]):format(ns.ShortName(m), other.name) end
 	end
-	-- Tasa de fundación (Shop.lua): se cobra al proponerla; si un oficial la rechaza, no.
-	local fee = ns.ShopItem and ns.ShopItem("tribeCreate")
-	if fee and ns.AvailableInsignias(nil) < fee.price then
-		return (L["Fundar una tribu cuesta %d insignias y tienes %d libres."]):format(fee.price, ns.AvailableInsignias(nil))
+	-- Tasa de fundación (Shop.lua): se reparte entre los fundadores y cada uno paga su parte
+	-- al aceptar (Merits.lua); si un oficial la rechaza, no se cobra.
+	local share = ns.TribeFeeShare({ members = set })
+	if share > 0 and ns.AvailableInsignias(nil) < share then
+		return (L["Tu parte para fundar la tribu son %d insignias y tienes %d libres."]):format(share, ns.AvailableInsignias(nil))
 	end
 	local icons = ns.TRIBE_ICONS[myFaction()]
 	local rec = { id = ("%s:%d"):format(me, ns.Now()), name = name, members = set, creator = me, status = "pending",
 		rev = 1, by = me, t = ns.Now(), icon = icons[math.random(#icons)] }
 	ns.MergeTribe(g, rec)
 	LG:Send("TRIBE", rec)
-	if fee then ns.Buy("tribeCreate", rec.id) end
 	LG:DataChanged()
 	simulateAccepts(rec.id, set)
 	LG:Print((L["«%s» propuesta: falta que acepten sus miembros y la aprobación de un oficial."]):format(name))
 	return nil
 end
 
+-- Parte de la tasa de fundación de cada fundador (0 si no hay tasa).
+function ns.TribeFeeShare(tribe)
+	local fee = ns.ShopItem and ns.ShopItem("tribeCreate")
+	local n = count(tribe.members or {})
+	if not fee or n == 0 then return 0 end
+	return math.ceil(fee.price / n)
+end
+
+-- Devuelve un error o nil.
 function ns.AcceptTribe(id)
 	local g = LG:GuildData()
-	local rec = { tribe = id, member = ns.PlayerFullName(), t = ns.Now() }
+	local me = ns.PlayerFullName()
+	local tribe = g and g.tribes[id]
+	-- Los fundadores pagan su parte al aceptar la propuesta (quien entra por invitación, no).
+	if tribe and tribe.status == "pending" and tribe.members[me] then
+		local share = ns.TribeFeeShare(tribe)
+		if share > 0 and ns.AvailableInsignias(nil) < share then
+			local err = (L["Tu parte para fundar la tribu son %d insignias y tienes %d libres."]):format(share, ns.AvailableInsignias(nil))
+			LG:Print(err)
+			return err
+		end
+	end
+	local rec = { tribe = id, member = me, t = ns.Now() }
 	if g and ns.MergeTribeAccept(g, rec) then
 		LG:Send("TRIBEACC", rec)
 		LG:DataChanged()

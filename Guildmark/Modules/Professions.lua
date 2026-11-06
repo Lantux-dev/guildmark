@@ -15,6 +15,15 @@ local Professions = LG:NewModule("Professions", "AceEvent-3.0", "AceTimer-3.0")
 
 local SCAN_DELAY = 1
 
+-- Aviso de nuevo rango de profesión según su nivel máximo (frases enteras: "Oficial" o
+-- "Artesano" sueltos ya son otros textos del addon).
+local RANK_UP = {
+	[150] = L["%s alcanza el rango Oficial en %s."],
+	[225] = L["%s alcanza el rango Experto en %s."],
+	[300] = L["%s alcanza el rango Artesano en %s."],
+	[375] = L["%s alcanza el rango Maestro en %s."],
+}
+
 function Professions:OnEnable()
 	ns.RegisterEvent(self, "SKILL_LINES_CHANGED", "UpdateProfessions")
 	ns.RegisterEvent(self, "TRADE_SKILL_LIST_UPDATE", "QueueScan")
@@ -38,6 +47,9 @@ function Professions:UpdateProfessions()
 	for id, p in pairs(list) do
 		local o = old[id]
 		if not o or o.rank ~= p.rank or o.max ~= p.max or o.icon ~= p.icon then changed = true end
+		-- Nuevo rango (Oficial, Experto...): sube el máximo de la profesión que ya tenías.
+		local text = o and (o.max or 0) > 0 and (p.max or 0) > o.max and RANK_UP[p.max]
+		if text and p.name then ns.GuildAnnounce(text:format(ns.ShortName(ns.PlayerFullName()), p.name)) end
 	end
 	for id in pairs(old) do
 		if not list[id] then changed = true end

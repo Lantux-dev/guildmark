@@ -375,11 +375,24 @@ local function newest(tbl)
 	return t
 end
 
--- Los registros más recientes de tbl posteriores a since, como mucho max.
+-- Lo más reciente de cada informante: así quien entra pide lo que le falta de cada uno.
+-- (Con una sola fecha, una baja propia reciente tapaba las de los demás de antes.)
+local function newestBy(tbl)
+	local by = {}
+	for _, rec in pairs(tbl) do
+		local who = rec.reporter or "?"
+		if (rec.t or 0) > (by[who] or 0) then by[who] = rec.t end
+	end
+	return by
+end
+
+-- Los registros más recientes de tbl posteriores a since (una fecha, o una por informante), como mucho max.
 local function newerThan(tbl, since, max)
 	local list = {}
 	for _, rec in pairs(tbl) do
-		if (rec.t or 0) > since then list[#list + 1] = rec end
+		local from = since
+		if type(since) == "table" then from = tonumber(since[rec.reporter or "?"]) or 0 end
+		if (rec.t or 0) > from then list[#list + 1] = rec end
 	end
 	table.sort(list, function(a, b) return a.t > b.t end)
 	for i = #list, max + 1, -1 do list[i] = nil end
@@ -399,7 +412,7 @@ function LG:StartSync()
 	local g = self:GuildData()
 	if not g then return end
 	self:SendMyRecord()
-	self:Send("HELLO", { kills = newest(g.kills), runs = newest(g.runs) })
+	self:Send("HELLO", { kills = newest(g.kills), runs = newest(g.runs), killsBy = newestBy(g.kills), runsBy = newestBy(g.runs) })
 end
 
 -- Responde un solo miembro: cada uno espera un tiempo aleatorio y el primero
@@ -418,8 +431,8 @@ ns.handlers.HELLO = function(sender, data, _, rawSender)
 		for _, rec in pairs(g.members) do members[#members + 1] = rec end
 		LG:Send("SYNC", {
 			members = members,
-			kills = newerThan(g.kills, tonumber(data.kills) or 0, SYNC_MAX_KILLS),
-			runs = newerThan(g.runs, tonumber(data.runs) or 0, SYNC_MAX_RUNS),
+			kills = newerThan(g.kills, type(data.killsBy) == "table" and data.killsBy or tonumber(data.kills) or 0, SYNC_MAX_KILLS),
+			runs = newerThan(g.runs, type(data.runsBy) == "table" and data.runsBy or tonumber(data.runs) or 0, SYNC_MAX_RUNS),
 			cache = recentCache(g.guildCache, SYNC_MAX_CACHE),
 			orders = g.orders,
 			events = g.events,

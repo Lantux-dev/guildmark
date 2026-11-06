@@ -1425,7 +1425,7 @@ local function targetsView(g, rows)
 			buttons = (canManage and t.how == "manual") and { { label = L["Quitar"], onClick = function() ns.ToggleTarget(t.guild) end } } or nil,
 		}
 	end
-	line(rows, grey(L["Kills honorables · misma víctima: 2 al día (la 3.ª a la mitad) · +5 por venganza · tope 100 al día"]), 1)
+	line(rows, grey(L["Kills que dan honor: 5 · hermandad objetivo o venganza: 10 (+5 la venganza) · misma víctima: 2 al día (la 3.ª a la mitad) · tope 100 al día"]), 1)
 
 	-- Nos cazan: hermandades que nos matan y no son objetivo, con el mismo cartel
 	-- que los objetivos pero más discreto y el botón para hacerlas objetivo.
@@ -3116,7 +3116,8 @@ local function tribesView(g, rows)
 		local buttons = {}
 		local iAccepted = accepted[me] or tribe.creator == me
 		if tribe.members[me] and not iAccepted and not left[me] then
-			buttons[#buttons + 1] = { label = L["Aceptar"], onClick = function() ns.AcceptTribe(tribe.id) end }
+			buttons[#buttons + 1] = { label = L["Aceptar"], onClick = function() ns.AcceptTribe(tribe.id) end,
+				tooltip = { L["Aceptar"], (L["Tu parte de la fundación: %d insignias."]):format(ns.TribeFeeShare(tribe)) } }
 			buttons[#buttons + 1] = { label = L["Rechazar"], onClick = function() ns.LeaveTribe(tribe.id) end }
 		end
 		if canManage then
@@ -4734,8 +4735,27 @@ local function create()
 	frame:SetScript("OnDragStart", frame.StartMoving)
 	frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
 	frame:SetScript("OnShow", render)
-	-- No se añade a UISpecialFrames (cerrar con Escape): en la beta contamina el menú
-	-- del juego y Blizzard bloquea la acción con el aviso de "solo para la interfaz de Blizzard".
+	-- No se añade a UISpecialFrames: en la beta contamina el menú del juego y Blizzard
+	-- bloquea la acción con el aviso de "solo para la interfaz de Blizzard". Escape se
+	-- atiende aquí: cierra la ventana y no llega al juego; el resto de teclas pasan.
+	-- En combate no se puede cambiar el paso de teclas: Escape sigue yendo al juego.
+	if frame.EnableKeyboard and frame.SetPropagateKeyboardInput then
+		frame:EnableKeyboard(true)
+		frame:SetPropagateKeyboardInput(true)
+		frame:SetScript("OnKeyDown", function(self, key)
+			if InCombatLockdown() then return end
+			if key == "ESCAPE" then
+				self:SetPropagateKeyboardInput(false)
+				self:Hide()
+			else
+				self:SetPropagateKeyboardInput(true)
+			end
+		end)
+		-- Al abrirse vuelve a dejar pasar las teclas (al cerrarse no: Escape se lo comería el juego).
+		frame:HookScript("OnShow", function(self)
+			if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
+		end)
+	end
 
 	-- Título y retrato con el emblema (como la ventana de Desafíos).
 	if frame.SetTitle then
