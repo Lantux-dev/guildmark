@@ -575,65 +575,176 @@ function ns.ToggleAchievements()
 end
 
 ---------------------------------------------------------------------------
--- Aviso de "¡Logro de hermandad completado!"
+-- Cartel de "¡Logro de hermandad!" (y de subida de nivel de la hermandad)
+--
+-- Un cartel grande arriba de la pantalla que entra creciendo, lo cruza un brillo (si la
+-- hermandad tiene el aviso dorado) y se desvanece. Si llegan varios, salen de uno en uno.
 ---------------------------------------------------------------------------
 
-local toasts = {}
+local TOAST = ns.MEDIA .. "Toast\\"
+local FONT_TITLE = ns.MEDIA .. "Fonts\\Orbitron-Bold.ttf" -- sin «» ni ·: no los tiene
+local FONT_TEXT = ns.MEDIA .. "Fonts\\Rajdhani-Bold.ttf"
+local TOAST_GOLD = { 0.82, 0.55, 0.12 }
+local TOAST_CREAM = { 0.95, 0.90, 0.82 }
+local TOAST_HOLD = 5.5 -- segundos en pantalla
 
-function ns.ShowAchievementToast(entry)
-	-- Un complemento puede pintar el aviso a su manera (GuildmarkAPI.RegisterToastHandler).
-	if ns.toastHandler then
-		local def = entry.def
-		local info = { id = def.id, name = def.name, desc = def.desc, icon = def.icon, category = def.cat or def.category,
-			gold = ns.GuildPerks().goldToast and true or false }
-		local ok, handled = pcall(ns.toastHandler, info)
-		if ok and handled then return end
-	end
-	local slot = #toasts + 1
+local toastQueue, toastFrame, toastBusy = {}, nil, false
+local showNextToast
+
+local function toastText(parent, font, size, color)
+	local fs = parent:CreateFontString(nil, "OVERLAY")
+	if not fs:SetFont(font, size, "") then fs:SetFontObject("GameFontHighlightLarge") end
+	fs:SetShadowOffset(1, -1)
+	fs:SetShadowColor(0, 0, 0, 1)
+	fs:SetTextColor(color[1], color[2], color[3], 1)
+	fs:SetJustifyH("LEFT")
+	fs:SetWordWrap(false)
+	return fs
+end
+
+local function createToast()
+	local w, h = 640, 160
 	local t = CreateFrame("Button", nil, UIParent)
-	t:SetSize(380, 84)
+	t:SetSize(w, h)
+	t:SetPoint("TOP", 0, -140)
 	t:SetFrameStrata("DIALOG")
-	t:SetPoint("TOP", 0, -140 - (slot - 1) * 90)
+	t:SetAlpha(0)
+	t:Hide()
 	t.bg = t:CreateTexture(nil, "BACKGROUND")
 	t.bg:SetAllPoints()
-	setArt(t.bg, { "Legacy-Challenge-Cards-selected", "Legacy-Challenge-Cards" }, 0.18, 0.15, 0.08, 0.95)
-	local icon = t:CreateTexture(nil, "ARTWORK")
-	icon:SetSize(48, 48)
-	icon:SetPoint("LEFT", 16, 0)
-	icon:SetTexture(entry.def.icon)
-	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-	local head = fontString(t, "GameFontNormal", "TOPLEFT", 76, -16)
-	head:SetText(L["¡Logro de hermandad completado!"])
-	local name = fontString(t, "GameFontHighlightLarge", "TOPLEFT", 76, -36)
-	name:SetText(entry.def.name)
-	local s = shield(t, 40)
-	s:SetPoint("RIGHT", -14, 0)
-	s.text:SetText("1")
-	t:SetScript("OnClick", function()
+	t.bg:SetTexture(TOAST .. "banner_big")
+
+	t.iconBorder = t:CreateTexture(nil, "BORDER")
+	t.iconBorder:SetColorTexture(TOAST_GOLD[1], TOAST_GOLD[2], TOAST_GOLD[3], 1)
+	t.iconBorder:SetSize(80, 80)
+	t.iconBorder:SetPoint("LEFT", 44, 0)
+	t.icon = t:CreateTexture(nil, "ARTWORK")
+	t.icon:SetSize(76, 76)
+	t.icon:SetPoint("CENTER", t.iconBorder)
+	t.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+	t.title = toastText(t, FONT_TITLE, 15, TOAST_GOLD)
+	t.title:SetPoint("TOPLEFT", 150, -34)
+	t.title:SetPoint("RIGHT", -30, 0)
+	t.text = toastText(t, FONT_TITLE, 30, TOAST_CREAM)
+	t.text:SetPoint("TOPLEFT", t.title, "BOTTOMLEFT", 0, -8)
+	t.text:SetPoint("RIGHT", -30, 0)
+	t.sub = toastText(t, FONT_TEXT, 17, { 0.75, 0.70, 0.62 })
+	t.sub:SetPoint("TOPLEFT", t.text, "BOTTOMLEFT", 0, -6)
+	t.sub:SetPoint("RIGHT", -30, 0)
+
+	-- Brillo que cruza el cartel una vez (recortado al cartel).
+	local clip = CreateFrame("Frame", nil, t)
+	clip:SetPoint("TOPLEFT", 14, -10)
+	clip:SetPoint("BOTTOMRIGHT", -14, 10)
+	if clip.SetClipsChildren then clip:SetClipsChildren(true) end
+	t.shine = clip:CreateTexture(nil, "OVERLAY")
+	t.shine:SetTexture(TOAST .. "shine")
+	t.shine:SetBlendMode("ADD")
+	t.shine:SetSize(120, h)
+	t.shine:SetPoint("RIGHT", clip, "LEFT", 0, 0)
+	t.shine:SetAlpha(0)
+	local sweep = t.shine:CreateAnimationGroup()
+	local move = sweep:CreateAnimation("Translation")
+	move:SetOffset(w + 120, 0)
+	move:SetDuration(1.1)
+	move:SetSmoothing("IN_OUT")
+	local shineIn = sweep:CreateAnimation("Alpha")
+	shineIn:SetFromAlpha(0)
+	shineIn:SetToAlpha(1)
+	shineIn:SetDuration(0.2)
+	t.sweep = sweep
+
+	-- Entrada creciendo; salida desvaneciéndose.
+	local enter = t:CreateAnimationGroup()
+	local fadeIn = enter:CreateAnimation("Alpha")
+	fadeIn:SetFromAlpha(0)
+	fadeIn:SetToAlpha(1)
+	fadeIn:SetDuration(0.25)
+	local grow = enter:CreateAnimation("Scale")
+	if grow.SetScaleFrom then
+		grow:SetScaleFrom(0.7, 0.7)
+		grow:SetScaleTo(1, 1)
+	else
+		grow:SetFromScale(0.7, 0.7)
+		grow:SetToScale(1, 1)
+	end
+	grow:SetDuration(0.35)
+	grow:SetSmoothing("OUT")
+	enter:SetScript("OnPlay", function() t:SetAlpha(1) end)
+	enter:SetScript("OnFinished", function() if t.gold then t.sweep:Play() end end)
+	t.enter = enter
+
+	local leave = t:CreateAnimationGroup()
+	local fadeOut = leave:CreateAnimation("Alpha")
+	fadeOut:SetFromAlpha(1)
+	fadeOut:SetToAlpha(0)
+	fadeOut:SetDuration(0.45)
+	leave:SetScript("OnFinished", function()
+		t:SetAlpha(0)
 		t:Hide()
-		ns.ToggleAchievements()
+		toastBusy = false
+		showNextToast()
 	end)
-	toasts[slot] = t
-	-- Nivel 3 de hermandad: aviso dorado con su sonido.
-	if ns.GuildPerks().goldToast then
-		t.bg:SetVertexColor(1, 0.85, 0.45)
-		head:SetText("|cffffd100" .. L["¡Logro de hermandad completado!"] .. "|r")
+	t.leave = leave
+
+	-- Clic: abre los logros y deja paso al siguiente.
+	t:SetScript("OnClick", function()
+		ns.ToggleAchievements()
+		if not t.leave:IsPlaying() then t.leave:Play() end
+	end)
+	return t
+end
+
+function showNextToast()
+	if toastBusy or #toastQueue == 0 then return end
+	local a = table.remove(toastQueue, 1)
+	toastFrame = toastFrame or createToast()
+	local t = toastFrame
+	toastBusy = true
+	t.gold = a.gold
+	t.icon:SetTexture(a.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+	t.title:SetText((a.title or ""):upper())
+	t.text:SetText(a.text or "")
+	t.sub:SetText(a.sub or "")
+	t:Show()
+	t.enter:Play()
+	-- Nivel 3 de hermandad: aviso dorado, con brillo y su sonido.
+	if a.gold then
 		pcall(PlaySound, (SOUNDKIT and SOUNDKIT.UI_LEGENDARY_LOOT_TOAST) or 63971)
 	else
 		pcall(PlaySound, (SOUNDKIT and SOUNDKIT.UI_70_CHALLENGE_MODE_COMPLETE_NO_UPGRADE) or 12891)
 	end
-
-	-- Se desvanece a los 7 segundos.
-	local elapsed = 0
-	t:SetScript("OnUpdate", function(self, dt)
-		elapsed = elapsed + dt
-		if elapsed > 7 then
-			self:SetAlpha(math.max(0, 1 - (elapsed - 7)))
-			if elapsed > 8 then
-				self:Hide()
-				self:SetScript("OnUpdate", nil)
-				toasts[slot] = nil
-			end
-		end
+	C_Timer.After(TOAST_HOLD, function()
+		if toastFrame == t and t:IsShown() and not t.leave:IsPlaying() then t.leave:Play() end
 	end)
+end
+
+local function queueToast(a)
+	toastQueue[#toastQueue + 1] = a
+	showNextToast()
+end
+
+function ns.ShowAchievementToast(entry)
+	local gold = ns.GuildPerks().goldToast and true or false
+	-- Un complemento puede pintar el aviso a su manera (GuildmarkAPI.RegisterToastHandler).
+	if ns.toastHandler then
+		local def = entry.def
+		local info = { id = def.id, name = def.name, desc = def.desc, icon = def.icon, category = def.cat or def.category, gold = gold }
+		local ok, handled = pcall(ns.toastHandler, info)
+		if ok and handled then return end
+	end
+	queueToast({ icon = entry.def.icon, gold = gold, title = gold and L["¡Logro de hermandad!"] or L["Logro de hermandad"],
+		text = entry.def.name, sub = entry.def.desc })
+end
+
+-- La hermandad sube de nivel (sale detrás del logro que lo ha provocado).
+function ns.ShowGuildLevelToast(level)
+	local perks = ns.GuildPerks()
+	local reward
+	for _, r in ipairs(ns.ACH_REWARDS) do
+		if ns.GuildLevel(r.points) == level then reward = r end
+	end
+	queueToast({ icon = reward and reward.icon or "Interface\\Icons\\INV_Misc_Trophy_03", gold = perks.goldToast and true or false,
+		title = L["Nivel de hermandad"], text = (L["¡Nivel %d!"]):format(level), sub = reward and reward.label or nil })
 end

@@ -1139,7 +1139,11 @@ L["Sigue jugando para descubrirlo."] = "Keep playing to discover it."
 L["Puntos de hermandad %d/%d"] = "Guild points %d/%d"
 L["Logros"] = "Achievements"
 L["Recompensas"] = "Rewards"
-L["¡Logro de hermandad completado!"] = "Guild achievement earned!"
+L["¡Logro de hermandad!"] = "Guild achievement!"
+L["Logro de hermandad"] = "Guild achievement"
+L["Nivel de hermandad"] = "Guild level"
+L["¡Nivel %d!"] = "Level %d!"
+L["/gmk aviso - ver cómo queda el cartel de logro de hermandad (solo lo ves tú)"] = "/gmk toast - preview the guild achievement banner (only you see it)"
 
 -- Llamada a las armas
 L["Siempre"] = "Always"

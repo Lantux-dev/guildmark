@@ -706,6 +706,7 @@ function Achievements:Check()
 			if ns.ShowAchievementToast then ns.ShowAchievementToast(newOnes[i]) end
 			announce(newOnes[i], i == shown and levelUp or nil)
 		end
+		if levelUp and ns.ShowGuildLevelToast then ns.ShowGuildLevelToast(levelUp) end
 		LG:DataChanged()
 	end
 end

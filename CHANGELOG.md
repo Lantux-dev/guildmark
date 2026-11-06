@@ -8,6 +8,7 @@
 - **Tribus más baratas:** fundar una cuesta 50 insignias repartidas entre los fundadores; cada uno paga su parte al aceptar. Quien pagó 100 recupera la diferencia.
 - **Avisos nuevos en el chat de hermandad:** logros de hermandad, subidas de nivel de hermandad y rangos de profesión (Oficial, Experto, Artesano…).
 - **Escape cierra la ventana** de Guildmark (en combate no: ahí, la X).
+- **Cartel nuevo para los logros de hermandad:** grande, arriba de la pantalla y con brillo si la hermandad tiene el aviso dorado. También sale uno cuando la hermandad sube de nivel. `/gmk aviso` enseña una muestra.
 
 ---
 
@@ -17,6 +18,7 @@
 - **Cheaper tribes:** founding one costs 50 badges split between the founders; each pays their share when accepting. Anyone who paid 100 gets the difference back.
 - **New guild chat announcements:** guild achievements, guild level-ups and profession ranks (Journeyman, Expert, Artisan…).
 - **Escape closes the Guildmark window** (not in combat: use the X there).
+- **New banner for guild achievements:** large, at the top of the screen, with a shine if the guild has the golden alert. One also appears when the guild levels up. `/gmk toast` shows a sample.
 
 ## 1.1.0 · 2026-11
 

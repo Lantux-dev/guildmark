@@ -20,6 +20,11 @@ presentarse como la versión oficial.
 `Guildmark/Libs` contiene librerías de terceros con su propia licencia:
 Ace3 (`Ace3-LICENSE.txt`), LibStub, CallbackHandler, LibSerialize y LibDeflate.
 
+## Fuentes incluidas
+
+`Guildmark/Media/Fonts` contiene Orbitron y Rajdhani, bajo la SIL Open Font License
+(`OFL-Orbitron.txt`, `OFL-Rajdhani.txt`). No están reservadas como el resto del arte.
+
 ---
 
 # Guildmark (English)
@@ -43,3 +48,8 @@ present itself as the official version.
 
 `Guildmark/Libs` contains third-party libraries under their own licenses:
 Ace3 (`Ace3-LICENSE.txt`), LibStub, CallbackHandler, LibSerialize and LibDeflate.
+
+## Bundled fonts
+
+`Guildmark/Media/Fonts` contains Orbitron and Rajdhani, under the SIL Open Font License
+(`OFL-Orbitron.txt`, `OFL-Rajdhani.txt`). They are not reserved like the rest of the art.

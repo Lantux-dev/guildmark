@@ -1048,6 +1048,7 @@ local HELP = {
 	L["/gmk red - estado de la red de hermandades"],
 	L["/gmk insignias - mostrar u ocultar las insignias sobre el marco de jugador"],
 	L["/gmk errores - ver y copiar los errores del addon para avisar de un fallo"],
+	L["/gmk aviso - ver cómo queda el cartel de logro de hermandad (solo lo ves tú)"],
 	L["/gmk debug - mensajes de depuración"],
 }
 
@@ -1057,6 +1058,7 @@ local COMMAND_ALIASES = {
 	adjust = "ajustar", challenges = "desafios", ["desafíos"] = "desafios", logros = "desafios", achievements = "desafios", auction = "subasta",
 	target = "objetivo", test = "prueba", profile = "perfil", war = "guerra", network = "red", badges = "insignias",
 	errors = "errores", error = "errores", bugs = "errores", fallos = "errores",
+	toast = "aviso", alert = "aviso",
 }
 
 function LG:SlashCommand(input)
@@ -1149,6 +1151,11 @@ function LG:SlashCommand(input)
 	elseif cmd == "errores" then
 		-- /gmk errores prueba: provoca un error a propósito, para comprobar que se registra.
 		if arg == "prueba" or arg == "test" then ns.TestError() else ns.ShowErrors() end
+	elseif cmd == "aviso" then
+		-- Muestra del cartel, solo en tu pantalla: no se envía ni se guarda nada.
+		for _, def in ipairs(ns.ACHIEVEMENTS or {}) do
+			if def.id == "kills1" then ns.ShowAchievementToast({ def = def }) end
+		end
 	elseif cmd == "debug" then
 		self.db.profile.debug = not self.db.profile.debug
 		self:Print("debug:", self.db.profile.debug and "on" or "off")
