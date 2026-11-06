@@ -12,11 +12,13 @@ local L = ns.L
 local LG = ns.LG
 
 local Achievements = LG:NewModule("Achievements", "AceEvent-3.0", "AceTimer-3.0")
+ns.AchievementsModule = Achievements
 
 local CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
 -- Profesiones principales (líneas de habilidad).
 local PRIMARY_PROFESSIONS = { 164, 165, 171, 182, 186, 197, 202, 333, 393 }
 local TOAST_WINDOW = 600 -- solo se anuncian los completados en los últimos 10 minutos
+local SYNC_GRACE = 180 -- al entrar, segundos que se espera a la sincronización antes de anunciar
 
 ns.ACH_CATEGORIES = {
 	{ key = "general", label = L["General"], icon = "Interface\\Icons\\Spell_Holy_PrayerofFortitude" },
@@ -645,9 +647,15 @@ function ns.MergeAchievement(g, rec)
 	return true
 end
 
+local announced -- (más abajo)
+
 ns.handlers.ACH = function(sender, rec)
 	local g = LG:GuildData()
-	if g and ns.MergeAchievement(g, rec) then
+	if not g or type(rec) ~= "table" then return end
+	-- Otro ya lo tenía de antes: no hace falta anunciarlo.
+	local old = g.achievements[rec.id]
+	if old and type(rec.t) == "number" and rec.t < old.t and type(rec.id) == "string" then announced[rec.id] = true end
+	if ns.MergeAchievement(g, rec) then
 		ns.InvalidateAchievements()
 		LG:DataChanged()
 	end
@@ -655,7 +663,7 @@ end
 
 -- Aviso en el chat de hermandad: todos los addons ven el logro a la vez, así que cada uno
 -- espera un poco al azar y el primero avisa a los demás (ACHANN) de que ya lo ha escrito.
-local announced = {} -- [id] = true: ya anunciado por alguien
+announced = {} -- [id] = true: ya anunciado por alguien (o ya lo tenía otro)
 
 ns.handlers.ACHANN = function(sender, rec)
 	if type(rec) == "table" and type(rec.id) == "string" then announced[rec.id] = true end
@@ -663,8 +671,14 @@ end
 
 local function announce(entry, level)
 	local id = entry.def.id
+	local mine = LG:GuildData() and LG:GuildData().achievements[id]
+	local t = mine and mine.t
 	Achievements:ScheduleTimer(function()
 		if announced[id] then return end
+		-- Si entretanto llegó una fecha anterior, otro ya lo tenía.
+		local g = LG:GuildData()
+		local now = g and g.achievements[id]
+		if t and now and now.t < t then return end
 		announced[id] = true
 		LG:Send("ACHANN", { id = id })
 		local text = (L["Logro de hermandad: «%s»."]):format(entry.def.name)
@@ -683,6 +697,21 @@ end
 function Achievements:Check()
 	local g = LG:GuildData()
 	if not g or not LG:HasConsent() then return end
+	-- Al entrar, la sincronización grande (SYNC) tarda en llegar: hasta entonces faltan
+	-- los logros que la hermandad ya tenía y saldrían como nuevos. Se espera a que llegue.
+	local waited = GetTime() - (self.enabledAt or 0)
+	if not LG.lastSync and waited < SYNC_GRACE then
+		if not self.graceTimer then
+			self.graceTimer = self:ScheduleTimer(function()
+				self.graceTimer = nil
+				self:Check()
+			end, SYNC_GRACE - waited + 1)
+		end
+		return
+	end
+	-- Sin sincronizar y sin logros guardados (addon recién instalado y nadie contesta):
+	-- se guardan sin anunciarlos, porque seguramente la hermandad ya los tenía.
+	local silent = not LG.lastSync and next(g.achievements) == nil
 	ns.InvalidateAchievements()
 	local state = ns.AchievementState()
 	local now = ns.Now()
@@ -693,7 +722,7 @@ function Achievements:Check()
 			g.achievements[entry.def.id] = { t = t }
 			LG:Send("ACH", { id = entry.def.id, t = t })
 			if not entry.def.feat then newPoints = newPoints + 1 end
-			if now - t <= TOAST_WINDOW then newOnes[#newOnes + 1] = entry end
+			if not silent and now - t <= TOAST_WINDOW then newOnes[#newOnes + 1] = entry end
 		end
 	end
 	if #newOnes > 0 then
@@ -712,6 +741,7 @@ function Achievements:Check()
 end
 
 function Achievements:OnEnable()
+	self.enabledAt = GetTime()
 	self:RegisterMessage("LANTUX_DATA_CHANGED", function()
 		-- Se agrupan los cambios: la revisión se hace un instante después.
 		if self.pending then return end
