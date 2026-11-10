@@ -268,6 +268,9 @@ local function gatherFacts(g)
 		end
 	end
 	f.chestDonated = ns.ChestState and ns.ChestState().donated or 0
+	-- Colecta del banco (BankFund.lua): oro reunido, meta y cuándo se llegó.
+	local fund = ns.BankFundState and ns.BankFundState(g)
+	f.fundTotal, f.fundGoal, f.fundReachedAt = fund and fund.total or 0, fund and fund.goal or 1, fund and fund.reachedAt
 
 	-- Cabezas con precio (Bounty.lua): cobradas y miembros con botín de guerra ahora.
 	f.bountyClaims, f.wagerMembers = {}, 0
@@ -591,6 +594,11 @@ local ACH = {
 		end },
 	{ id = "chestDonate", cat = "community", name = L["Arcas llenas"], icon = "Interface\\Icons\\INV_Misc_Coin_02",
 		desc = L["Donad 2.000 insignias entre todos al cofre y a sus proyectos."], eval = snapshot("chestDonated", 2000) },
+	{ id = "bankFund", cat = "community", name = L["Las arcas de la hermandad"], icon = "Interface\\Icons\\INV_Misc_Coin_17",
+		desc = L["Reunid entre todos el oro de la colecta para abrir el banco de la hermandad."], eval = function(f)
+			local gold, goal = math.floor(f.fundTotal / 10000), math.max(1, math.floor(f.fundGoal / 10000))
+			return math.min(gold, goal), goal, f.fundReachedAt
+		end },
 }
 ns.ACHIEVEMENTS = ACH
 
@@ -649,13 +657,35 @@ end
 
 local announced -- (más abajo)
 
+-- Desde cuándo (GetTime) tiene este addon cada logro. Los que ya estaban guardados al
+-- entrar cuentan como antiguos. Sirve para avisar a quien lo da por nuevo sin serlo.
+local knownSince = {}
+local heardAnn = {} -- [id] = GetTime() del último ACHANN recibido
+local OLD_AFTER = 60
+local function markKnown(id)
+	if knownSince[id] == nil then knownSince[id] = GetTime() end
+end
+
 ns.handlers.ACH = function(sender, rec)
 	local g = LG:GuildData()
-	if not g or type(rec) ~= "table" then return end
-	-- Otro ya lo tenía de antes: no hace falta anunciarlo.
+	if not g or type(rec) ~= "table" or type(rec.id) ~= "string" then return end
 	local old = g.achievements[rec.id]
-	if old and type(rec.t) == "number" and rec.t < old.t and type(rec.id) == "string" then announced[rec.id] = true end
+	-- Otro ya lo tenía de antes: no hace falta anunciarlo.
+	if old and type(rec.t) == "number" and rec.t < old.t then announced[rec.id] = true end
+	-- Lo tengo yo desde hace rato y alguien (recién llegado o sin sincronizar del todo) lo
+	-- da por nuevo: se le dice que ya está anunciado, antes de que lo escriba en el chat.
+	-- (Lo que llegó por sincronización no tiene hora: también cuenta como antiguo.)
+	-- Contesta uno: cada addon espera un poco al azar y calla si otro ya lo ha dicho.
+	if old and GetTime() - (knownSince[rec.id] or -math.huge) > OLD_AFTER then
+		announced[rec.id] = true
+		local id, asked = rec.id, GetTime()
+		Achievements:ScheduleTimer(function()
+			if (heardAnn[id] or -math.huge) >= asked then return end
+			LG:Send("ACHANN", { id = id })
+		end, math.random() * 0.8)
+	end
 	if ns.MergeAchievement(g, rec) then
+		markKnown(rec.id)
 		ns.InvalidateAchievements()
 		LG:DataChanged()
 	end
@@ -666,7 +696,10 @@ end
 announced = {} -- [id] = true: ya anunciado por alguien (o ya lo tenía otro)
 
 ns.handlers.ACHANN = function(sender, rec)
-	if type(rec) == "table" and type(rec.id) == "string" then announced[rec.id] = true end
+	if type(rec) == "table" and type(rec.id) == "string" then
+		announced[rec.id] = true
+		heardAnn[rec.id] = GetTime()
+	end
 end
 
 local function announce(entry, level)
@@ -684,7 +717,7 @@ local function announce(entry, level)
 		local text = (L["Logro de hermandad: «%s»."]):format(entry.def.name)
 		if level then text = text .. " " .. (L["¡La hermandad sube a nivel %d!"]):format(level) end
 		ns.GuildAnnounce(text)
-	end, 1 + math.random() * 6)
+	end, 2.5 + math.random() * 5) -- margen para que quien ya lo tenía avise (ACHANN)
 end
 
 -- Título y emblema dorado (lo que pinta la cabecera de la ventana).
@@ -720,6 +753,7 @@ function Achievements:Check()
 		if entry.done and not g.achievements[entry.def.id] then
 			local t = entry.doneAt or now
 			g.achievements[entry.def.id] = { t = t }
+			markKnown(entry.def.id)
 			LG:Send("ACH", { id = entry.def.id, t = t })
 			if not entry.def.feat then newPoints = newPoints + 1 end
 			if not silent and now - t <= TOAST_WINDOW then newOnes[#newOnes + 1] = entry end

@@ -89,7 +89,8 @@ local function targetGuildsAt(g, at)
 	end
 	local list = {}
 	for guild, n in pairs(counts) do list[#list + 1] = { guild = guild, n = n } end
-	table.sort(list, function(a, b) return a.n > b.n end)
+	-- Empates por nombre: así todos los addons eligen las mismas.
+	table.sort(list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.guild < b.guild end)
 	local targets = {}
 	for i = 1, math.min(TARGET_AUTO_COUNT, #list) do targets[list[i].guild] = "auto" end
 	for guild, t in pairs(g.targets) do
@@ -97,6 +98,49 @@ local function targetGuildsAt(g, at)
 	end
 	return targets
 end
+ns.TargetGuildsAtSlow = targetGuildsAt -- para las pruebas
+
+-- Lo mismo para muchos momentos seguidos (las kills del libro de puntos, en orden):
+-- una ventana de 7 días que avanza, en lugar de recorrer todas las kills en cada una.
+-- Recorrerlas todas por cada kill crecía con el cuadrado del historial (tirones de 50 ms).
+-- Devuelve at(t) -> tabla de objetivos; hay que llamarla con t creciente.
+local function targetTimeline(g)
+	local deaths = {}
+	for _, k in pairs(g.kills) do
+		if k.kind == "death" and k.guild and not k.bg then deaths[#deaths + 1] = k end
+	end
+	table.sort(deaths, function(a, b) return a.t < b.t end)
+	local manual = {}
+	for guild, t in pairs(g.targets) do
+		if t.active then manual[guild] = "manual" end
+	end
+	local counts, nextIn, nextOut = {}, 1, 1
+	local current, dirty = nil, true
+	return function(at)
+		while deaths[nextIn] and deaths[nextIn].t <= at do
+			local guild = deaths[nextIn].guild
+			counts[guild] = (counts[guild] or 0) + 1
+			nextIn, dirty = nextIn + 1, true
+		end
+		while nextOut < nextIn and at - deaths[nextOut].t > TARGET_WINDOW do
+			local guild = deaths[nextOut].guild
+			counts[guild] = counts[guild] - 1
+			if counts[guild] == 0 then counts[guild] = nil end
+			nextOut, dirty = nextOut + 1, true
+		end
+		if dirty then
+			local list = {}
+			for guild, n in pairs(counts) do list[#list + 1] = { guild = guild, n = n } end
+			table.sort(list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.guild < b.guild end)
+			current = {}
+			for i = 1, math.min(TARGET_AUTO_COUNT, #list) do current[list[i].guild] = "auto" end
+			for guild, v in pairs(manual) do current[guild] = v end
+			dirty = false
+		end
+		return current
+	end
+end
+ns.TargetTimeline = targetTimeline -- para las pruebas
 
 function ns.TargetGuilds()
 	local g = LG:GuildData()
@@ -172,8 +216,9 @@ local function collectEntries(g)
 	end
 	table.sort(kills, function(a, b) return a.t < b.t end)
 	local sameVictim = {}
+	local targetsAt = targetTimeline(g)
 	for _, k in ipairs(kills) do
-		local hunt = k.revenge or (k.guild and targetGuildsAt(g, k.t)[k.guild])
+		local hunt = k.revenge or (k.guild and targetsAt(k.t)[k.guild])
 		if hunt or (tonumber(k.honor) or 0) > 0 then
 			local key = ("%s|%s|%d"):format(k.killerName, k.victim or k.victimName or "?", dayIndex(k.t))
 			sameVictim[key] = (sameVictim[key] or 0) + 1
@@ -317,6 +362,13 @@ local function collectEntries(g)
 		end
 	end
 
+	-- Colecta del banco (BankFund.lua): reputación e insignias por cada oro dado al tesorero.
+	if ns.BankFundEntries then
+		for _, e in ipairs(ns.BankFundEntries(g)) do
+			add(e.t, e.member, "fund", { rep = e.rep, merits = e.merits }, (L["Colecta del banco: %s"]):format(ns.MoneyText(e.amount)))
+		end
+	end
+
 	-- Tienda (Shop.lua): solo cuenta si en ese momento había insignias para pagarlo.
 	-- La tasa de fundar una tribu no sale de las compras: se reparte entre los fundadores (abajo).
 	for id, p in pairs(g.purchases or {}) do
@@ -451,7 +503,12 @@ function ns.Scores()
 		end
 	end
 
-	for _, e in ipairs(collectEntries(g)) do
+	local t0 = ns.PerfStart and ns.PerfStart()
+	local all = collectEntries(g)
+	if t0 then ns.PerfStop("puntos: reunir historial", t0) end
+	ns.ledgerSize = #all
+	t0 = ns.PerfStart and ns.PerfStart()
+	for _, e in ipairs(all) do
 		local s = score(e.member)
 		decayTo(s, weekIndex(e.t))
 		if e.special then
@@ -503,6 +560,7 @@ function ns.Scores()
 		end
 		s.periods = nil
 	end
+	if t0 then ns.PerfStop("puntos: sumar", t0) end
 	cache = scores
 	return scores
 end

@@ -1,5 +1,41 @@
 # Cambios · Changelog
 
+## 1.1.4 · 2026-11
+
+- **Fewer stutters:** every guild message (activity, guilds seen, member records...) recalculated the whole guild's points on the spot, even when it didn't affect them. Points are now only recalculated when something that counts for them changes, and refreshes are grouped (at most once per second, once every 3 seconds in combat). Working out kills on target guilds also went through the whole history for every kill; it now does a single pass and is far faster.
+- **New: `/gmk performance`** shows which parts of the addon take the most time and how many stutters they caused, so slowdowns can be reported.
+
+---
+
+- **Menos tirones:** cada mensaje de la hermandad (actividad, hermandades vistas, fichas...) recalculaba al momento los puntos de toda la hermandad, aunque no les afectara. Ahora los puntos solo se recalculan cuando cambia algo que cuenta para ellos, y los refrescos se agrupan (como mucho uno por segundo, uno cada 3 segundos en combate). Además, el cálculo de las bajas a hermandades objetivo repasaba todo el historial por cada baja; ahora lo recorre una sola vez y tarda muchísimo menos.
+- **Nuevo: `/gmk rendimiento`** muestra qué partes del addon gastan más tiempo y cuántos tirones han causado, para poder avisar si algo va lento.
+
+## 1.1.3 · 2026-11
+
+- **Arreglado: error «script ran too long» al sincronizar.** En hermandades grandes, contestar a quien acababa de entrar obligaba a comprimir todo el estado de la hermandad de golpe, se pasaba del tiempo que deja el juego y quien entraba se quedaba sin sincronizar. Ahora sale en varios mensajes más pequeños.
+- **Arreglado: logros repetidos en el chat.** Quien entraba sin tener aún toda la sincronización podía anunciar como nuevo un logro que la hermandad ya tenía. Ahora se espera a recibirla entera y, si aun así alguien lo da por nuevo, los que ya lo tenían le avisan antes de que salga en el chat.
+- **Arreglado: la colecta del banco no le llegaba a quien instalaba el addon.** Ahora el tesorero (o el maestro de hermandad, si el tesorero no está) le pasa la colecta y las aportaciones a quien entra sin tenerlas.
+
+---
+
+- **Fixed: "script ran too long" error when syncing.** In big guilds, answering a guildmate who just logged in meant compressing the whole guild state at once, which ran past the game's time limit and left them unsynced. It now goes out in several smaller messages.
+- **Fixed: repeated achievements in chat.** Someone logging in before receiving the full sync could announce an achievement the guild already had as new. The addon now waits for the whole sync and, if someone still reports it as new, those who already had it tell them before it reaches the chat.
+- **Fixed: the bank fundraiser didn't reach people who just installed the addon.** The treasurer (or the guild master, if the treasurer is offline) now sends the fundraiser and its donations to anyone who logs in without them.
+
+## 1.1.2 · 2026-11
+
+- **Arreglado: cada uno veía bajas distintas** (por ejemplo en «Cazadores de la semana»). Si te perdías unas bajas de un compañero y luego veías en directo otra suya más reciente, las anteriores ya no te llegaban nunca. Ahora, al entrar, el addon compara cuántas bajas y mazmorras tiene de cada compañero y día de las últimas tres semanas y pide los días que no cuadran. Además, quien entra le devuelve a quien le contesta lo que a este le faltaba, así que cada entrada arregla a los dos. Lo que ya falta se va recuperando solo a medida que entráis con la 1.1.2.
+- **Colecta para abrir el banco:** el maestro de hermandad crea una colecta de oro (por defecto 100 de oro) y elige tesorero. Se dona dándole el oro al tesorero por intercambio (sin poner nada a cambio) o por correo: su addon lo apunta solo, así que la barra es la misma para todos y nadie se apunta oro de más. Cada moneda de oro da 2 de reputación y 2 insignias, quien dona queda como **fundador del banco** (sale en su ficha y en la placa de fundadores del banco) y la hermandad gana el logro **«Las arcas de la hermandad»** al llegar a la meta. Lo que sobra va al banco.
+- **Lista de miembros:** ordénala por nombre, nivel, rango, insignias o zona (clic otra vez para invertir el orden) y oculta o muestra los desconectados. Se recuerda lo que elijas.
+- **Barra de reputación más clara:** si ya tienes la reputación del rango siguiente y solo te falta antigüedad, la barra sale llena con un ✔ en lugar de «130 / 100». La reputación no tiene tope semanal; los topes de 100 son de insignias.
+
+---
+
+- **Fixed: everyone saw different kill counts** (e.g. in "Hunters of the week"). If you missed some of a guildmate's kills and then saw a newer one live, the earlier ones never reached you. On login the addon now compares how many kills and dungeons it has from each guildmate per day over the last three weeks and asks for the days that don't match. Whoever logs in also sends back what the responder was missing, so each login fixes both sides. Records already missing are recovered as people log in with 1.1.2.
+- **Fundraiser to open the bank:** the guild master starts a gold fundraiser (100 gold by default) and picks a treasurer. Members donate by giving the treasurer gold by trade (asking nothing in return) or by mail: the treasurer's addon records it automatically, so everyone sees the same bar and nobody can add fake gold. Each gold coin gives 2 reputation and 2 badges, donors become **bank founders** (shown on their member card and on the bank's founders plaque) and the guild earns the **"The Guild Coffers"** achievement when the goal is reached. Any surplus goes into the bank.
+- **Member list:** sort by name, level, rank, badges or zone (click again to reverse) and show or hide offline members. Your choice is remembered.
+- **Clearer reputation bar:** if you already have the reputation for the next rank and only need more time in the guild, the bar shows full with a ✔ instead of "130 / 100". Reputation has no weekly cap; the 100 caps are for badges.
+
 ## 1.1.1 · 2026-11
 
 - **Arreglado: las bajas y mazmorras de los demás no llegaban.** Al entrar, el addon pedía solo lo posterior a su último registro, así que una baja tuya reciente tapaba las de los demás de antes. Ahora pide lo que le falta de cada miembro. Funciona del todo cuando quien te contesta también tiene la 1.1.1: actualizad todos.

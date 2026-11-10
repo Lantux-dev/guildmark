@@ -147,7 +147,7 @@ local libs = {
 LibStub = function(name) return libs[name] end
 
 -- Carga en el orden del .toc.
-local ns = {}
+local ns = { SYNC_DATA_CHANGED = true } -- refrescos al momento, sin temporizador
 -- SOURCES lo rellena smoke.js con el código de cada archivo del .toc
 for _, entry in ipairs(SOURCES) do
 	local chunk = assert(load(entry.src, "@" .. entry.name))
@@ -1677,6 +1677,295 @@ do
 	ns.SetGuildSetting("guildChat", nil)
 	SendChatMessage, C_ChatInfo, IsInGroup = savedSend, savedCI, savedGroup
 	print_("OK anuncios en el chat de hermandad")
+end
+
+-- Logros al entrar: no se anuncian los que la hermandad ya tenía.
+do
+	local A = ns.AchievementsModule
+	local timers, savedST = {}, A.ScheduleTimer
+	A.ScheduleTimer = function(_, fn) if type(fn) == "function" then timers[#timers + 1] = fn end return 1 end
+	local sent, toasts = {}, 0
+	local savedAnn, savedToast, savedLvl = ns.GuildAnnounce, ns.ShowAchievementToast, ns.ShowGuildLevelToast
+	ns.GuildAnnounce = function(t) sent[#sent + 1] = t end
+	ns.ShowAchievementToast = function() toasts = toasts + 1 end
+	ns.ShowGuildLevelToast = function() end
+	local savedAch, savedSync, savedEnabled, savedNow, savedOffset = g.achievements, LG.lastSync, A.enabledAt, NOW, GET_TIME_OFFSET
+	-- Recién instalado: hasta que llega la sincronización, nada.
+	g.achievements, LG.lastSync, A.enabledAt, A.graceTimer = {}, nil, GetTime(), nil
+	A:Check()
+	assert(next(g.achievements) == nil and #timers == 1, "espera a la sincronización")
+	-- Nadie contesta: se guardan sin anunciar.
+	GET_TIME_OFFSET = (GET_TIME_OFFSET or 0) + 200
+	table.remove(timers, 1)()
+	assert(next(g.achievements) ~= nil and toasts == 0 and #timers == 0, "recién instalado sin respuesta: se guardan sin anunciar")
+	-- Sincronizado: uno nuevo se anuncia, salvo que llegue una fecha anterior de otro.
+	LG.lastSync = { from = "Ana Sol", t = NOW }
+	local function fresh(id)
+		g.achievements[id] = nil
+		ns.InvalidateAchievements()
+		local d = ns.AchievementState().byId[id].doneAt
+		NOW = d + 10
+		A:Check()
+		return d
+	end
+	local d = fresh("kills1")
+	assert(toasts == 1 and #timers == 1, "logro nuevo: cartel y aviso pendiente")
+	ns.handlers.ACH("Ana Sol", { id = "kills1", t = d - 100 })
+	table.remove(timers, 1)()
+	assert(#sent == 0, "otro ya lo tenía: no se anuncia")
+	fresh("bg1")
+	table.remove(timers, 1)()
+	assert(#sent == 1 and (sent[1]:find("First Victory", 1, true) or sent[1]:find("Primera victoria", 1, true)), "logro nuevo de verdad: se anuncia")
+	g.achievements, LG.lastSync, A.enabledAt, NOW, GET_TIME_OFFSET = savedAch, savedSync, savedEnabled, savedNow, savedOffset
+	A.ScheduleTimer, ns.GuildAnnounce, ns.ShowAchievementToast, ns.ShowGuildLevelToast = savedST, savedAnn, savedToast, savedLvl
+	ns.InvalidateAchievements()
+	print_("OK logros al entrar: espera a la sincronización, recién instalado sin anunciar, ya los tenía otro")
+end
+
+-- Sincronización por resumen: los huecos antiguos se recuperan, en los dos sentidos.
+do
+	local savedKills, savedSend, savedST, savedNow, savedRaw = g.kills, LG.Send, LG.ScheduleTimer, NOW, LG.lastRawSenders
+	local sent, timers = {}, {}
+	LG.Send = function(_, kind, data, channel, target) sent[#sent + 1] = { kind = kind, data = data, channel = channel, target = target } end
+	LG.ScheduleTimer = function(_, fn) timers[#timers + 1] = fn return 1 end
+	local day = 86400
+	NOW = 100 * day
+	local function k(who, t) return { id = who .. ":" .. t, kind = "kill", t = t, reporter = who, killerName = who, victimName = "X" } end
+	-- El responder lo tiene todo de Draken; yo me perdí la del día 98 pero vi en directo la del 99.
+	local full = { k("Draken", 98 * day), k("Draken", 98 * day + 60), k("Draken", 99 * day), k("Ana", 97 * day) }
+	local mine = { full[3], k("Yo", 99 * day + 5) }
+	local function tbl(list) local t = {} for _, r in ipairs(list) do t[r.id] = r end return t end
+	-- Lo que pide el método antiguo (lo posterior a lo último de cada uno): nada de Draken.
+	g.kills = tbl(mine)
+	local hello = { killsBy = { Draken = 99 * day, Yo = 99 * day + 5 }, killDigest = ns.SyncDigest(g.kills), runDigest = {} }
+	-- Contesta el otro.
+	g.kills = tbl(full)
+	ns.handlers.HELLO("Yo", hello, "GUILD", "Yo")
+	table.remove(timers, 1)()
+	while #timers > 0 do table.remove(timers, 1)() end -- el SYNC puede salir en varios trozos
+	local parts, got = {}, {}
+	for _, m in ipairs(sent) do
+		if m.kind == "SYNC" then
+			assert(m.target == "Yo", "contesta por susurro")
+			parts[#parts + 1] = m.data
+			for _, r in ipairs(m.data.kills or {}) do got[r.id] = true end
+		end
+	end
+	assert(#parts > 0, "contesta con un SYNC")
+	assert(got["Draken:" .. 98 * day] and got["Draken:" .. (98 * day + 60)] and got["Ana:" .. 97 * day], "manda los días que me faltan, aunque sean anteriores a lo último")
+	assert(not got["Draken:" .. 99 * day], "no manda los días que ya cuadran")
+	-- Lo recibo yo: me quedo con todo y le devuelvo la mía, que a él le faltaba.
+	g.kills = tbl(mine)
+	sent = {}
+	for _, d in ipairs(parts) do ns.handlers.SYNC("Responde", d, "WHISPER") end
+	local n = 0
+	for _ in pairs(g.kills) do n = n + 1 end
+	assert(n == 5, "tras el sync tengo las 5")
+	assert(#sent == 1 and sent[1].kind == "FILL" and #sent[1].data.kills == 1 and sent[1].data.kills[1].reporter == "Yo", "le devuelvo lo que a él le faltaba")
+	g.kills = tbl(full)
+	ns.handlers.FILL("Yo", sent[1].data, "WHISPER")
+	n = 0
+	for _ in pairs(g.kills) do n = n + 1 end
+	assert(n == 5, "el que respondió también queda completo")
+	-- Un HELLO antiguo (sin resumen) sigue funcionando como antes.
+	sent = {}
+	LG.syncClaims = {}
+	ns.handlers.HELLO("Viejo", { killsBy = { Draken = 98 * day + 60 } }, "GUILD", "Viejo")
+	table.remove(timers, 1)()
+	assert(sent[#sent].kind == "SYNC", "versión antigua: contesta igual")
+	g.kills, LG.Send, LG.ScheduleTimer, NOW, LG.lastRawSenders = savedKills, savedSend, savedST, savedNow, savedRaw
+	LG.syncClaims, LG.lastSync = {}, nil
+	print_("OK sincronización por resumen: recupera huecos antiguos y devuelve lo que falta al que responde")
+end
+
+
+-- SYNC grande en trozos: cada uno se comprime aparte (antes "script ran too long").
+do
+	local savedKills, savedSend, savedST, savedNow = g.kills, LG.Send, LG.ScheduleTimer, NOW
+	local sent, timers = {}, {}
+	LG.Send = function(_, kind, data, channel, target) sent[#sent + 1] = { kind = kind, data = data, target = target } end
+	LG.ScheduleTimer = function(_, fn) timers[#timers + 1] = fn return 1 end
+	NOW = 100 * 86400
+	local big = {}
+	for i = 1, 600 do
+		local t = 90 * 86400 + i * 600
+		big["Draken:" .. t] = { id = "Draken:" .. t, kind = "kill", t = t, reporter = "Draken", killerName = "Draken", victimName = "Víctima número " .. i, zone = "Vega de Tuercespina" }
+	end
+	g.kills = big
+	LG.syncClaims = {}
+	ns.handlers.HELLO("Nuevo", { killsBy = {}, killDigest = {}, runDigest = {} }, "GUILD", "Nuevo")
+	table.remove(timers, 1)()
+	while #timers > 0 do table.remove(timers, 1)() end
+	assert(#sent > 3 and sent[1].kind == "CLAIM", "el SYNC grande sale en varios mensajes")
+	local withDigest = 0
+	for i = 2, #sent do
+		assert(sent[i].kind == "SYNC" and sent[i].target == "Nuevo", "todos los trozos van por susurro a quien entra")
+		if sent[i].data.killDigest then withDigest = withDigest + 1 end
+	end
+	assert(withDigest == 1, "el resumen va entero en un solo trozo")
+	-- Quien entra recibe los trozos y acaba con todas las bajas que caben en un SYNC.
+	g.kills = {}
+	local parts = {}
+	for i = 2, #sent do parts[#parts + 1] = sent[i].data end
+	sent = {}
+	for _, d in ipairs(parts) do ns.handlers.SYNC("Responde", d, "WHISPER") end
+	local n = 0
+	for _ in pairs(g.kills) do n = n + 1 end
+	assert(n == 500, "tras todos los trozos tiene las 500 bajas (" .. n .. ")")
+	g.kills, LG.Send, LG.ScheduleTimer, NOW = savedKills, savedSend, savedST, savedNow
+	LG.syncClaims, LG.lastSync = {}, nil
+	print_("OK sincronización en trozos: un SYNC grande sale en varios mensajes y llega completo")
+end
+
+-- 1.1.3: la sincronización cuenta como hecha con el último trozo; quien ya tenía un logro
+-- avisa al que lo da por nuevo; el tesorero pasa la colecta a quien entra sin ella.
+do
+	local savedSync = LG.lastSync
+	LG.lastSync = nil
+	ns.handlers.SYNC("Responde", { _part = 1, _parts = 2 }, "WHISPER")
+	assert(LG.lastSync == nil, "con el primer trozo aún no está sincronizado")
+	ns.handlers.SYNC("Responde", { _part = 2, _parts = 2 }, "WHISPER")
+	assert(LG.lastSync and LG.lastSync.from == "Responde", "con el último, sí")
+	LG.lastSync = savedSync
+
+	-- Logro que ya teníamos (llegó por sincronización): alguien lo manda como nuevo.
+	local A = ns.AchievementsModule
+	local timers, savedST, savedSend = {}, A.ScheduleTimer, LG.Send
+	A.ScheduleTimer = function(_, fn) if type(fn) == "function" then timers[#timers + 1] = fn end return 1 end
+	local sent = {}
+	LG.Send = function(_, kind, data) sent[#sent + 1] = { kind = kind, data = data } end
+	g.achievements.viejo = { t = 1000 }
+	ns.handlers.ACH("Nuevo", { id = "viejo", t = 5000 })
+	assert(#timers == 1, "programa el aviso de que ya estaba")
+	table.remove(timers, 1)()
+	assert(#sent == 1 and sent[1].kind == "ACHANN" and sent[1].data.id == "viejo", "le dice que ya está anunciado")
+	-- Si otro contesta antes, este calla.
+	sent = {}
+	ns.handlers.ACH("Otro", { id = "viejo", t = 6000 })
+	ns.handlers.ACHANN("Ana Sol", { id = "viejo" })
+	table.remove(timers, 1)()
+	assert(#sent == 0, "ya contestó otro: no repite")
+	g.achievements.viejo = nil
+	A.ScheduleTimer = savedST
+
+	-- Colecta: el tesorero se la pasa a quien entra sin ella.
+	local me = ns.PlayerFullName()
+	local savedGifts, savedSetting, savedLST = g.fundGifts, g.settings.bankFund, LG.ScheduleTimer
+	local ltimers = {}
+	LG.ScheduleTimer = function(_, fn) ltimers[#ltimers + 1] = fn return 1 end
+	g.settings.bankFund = { value = { goal = 1000000, treasurer = me }, by = me, t = 50 }
+	g.fundGifts = { f1 = { id = "f1", t = 60, member = "Ana Sol", amount = 50000, via = "trade", by = me } }
+	sent = {}
+	ns.OnFundHello("Nuevo", { fundCount = 1, fundSet = 50 }, "Nuevo")
+	ns.OnFundHello("Viejo", { killsBy = {} }, "Viejo")
+	assert(#ltimers == 0, "al día o versión sin colecta: no le manda nada")
+	ns.OnFundHello("Nuevo", { fundCount = 0, fundSet = 0 }, "Nuevo")
+	assert(#ltimers == 1, "le falta: se la manda")
+	table.remove(ltimers, 1)()
+	assert(#sent == 1 and sent[1].kind == "FUNDS", "por susurro, con FUNDS")
+	local data = sent[1].data
+	g.fundGifts, g.settings.bankFund = {}, nil
+	ns.handlers.FUNDS(me, data, "WHISPER")
+	assert(g.fundGifts.f1 and ns.BankFund() and ns.BankFundState().total == 50000, "quien entra ve la colecta y las aportaciones")
+	g.fundGifts, g.settings.bankFund, LG.ScheduleTimer, LG.Send = savedGifts, savedSetting, savedLST, savedSend
+	print_("OK 1.1.3: sincronización completa con el último trozo, logros ya anunciados, colecta a quien entra")
+end
+
+-- Hermandades objetivo en el libro de puntos: la ventana que avanza da lo mismo que recorrerlo todo.
+do
+	local savedKills, savedTargets = g.kills, g.targets
+	local guilds = { "Los Ogros", "Sangre Fría", "Ventolera", "Hacha Roja", "La Plaga", "Nocturnos", "Brasas", "Colmillos" }
+	local kills = {}
+	math.randomseed(7)
+	for i = 1, 400 do
+		local t = 1000000 + math.random(0, 40 * 86400)
+		kills["d" .. i] = { id = "d" .. i, kind = math.random() < 0.7 and "death" or "kill", t = t, guild = guilds[math.random(#guilds)], bg = math.random() < 0.1 or nil }
+	end
+	g.kills = kills
+	g.targets = { ["Brasas"] = { active = true }, ["Inactiva"] = { active = false } }
+	local at = ns.TargetTimeline(g)
+	local checked = 0
+	for t = 1000000, 1000000 + 45 * 86400, 7919 do
+		local fast, slow = at(t), ns.TargetGuildsAtSlow(g, t)
+		for k, v in pairs(slow) do assert(fast[k] == v, "falta " .. k .. " en " .. t) end
+		for k, v in pairs(fast) do assert(slow[k] == v, "sobra " .. k .. " en " .. t) end
+		checked = checked + 1
+	end
+	g.kills, g.targets = savedKills, savedTargets
+	print_(("OK hermandades objetivo: ventana deslizante igual que el cálculo completo en %d momentos"):format(checked))
+end
+
+-- Colecta del banco: la apunta el tesorero (intercambio y correo), da puntos, logro y fundadores.
+do
+	local me = ns.PlayerFullName()
+	-- En modo prueba todos son rango 0: el maestro, solo yo.
+	local saved = { gm = ns.IsGuildMaster, gifts = g.fundGifts, setting = g.settings.bankFund }
+	ns.IsGuildMaster = function(name) return name == me end
+	local savedSend = LG.Send
+	local sentKinds = {}
+	LG.Send = function(_, kind) sentKinds[#sentKinds + 1] = kind end
+	ns.roster["Ana Sol"] = ns.roster["Ana Sol"] or { rankIndex = 4, class = "MAGE" }
+	ns.roster["Otro Oficial"] = { rankIndex = 1 }
+	g.fundGifts, g.settings.bankFund = {}, nil
+	-- Solo el maestro la crea.
+	assert(not ns.MergeSetting(g, { key = "bankFund", value = { goal = 1000000, treasurer = "Otro Oficial" }, by = "Otro Oficial", t = ns.Now() + 50 }, "Otro Oficial"),
+		"un oficial no puede crear la colecta")
+	assert(ns.SetBankFund(100, me) and ns.BankFund().goal == 1000000 and ns.BankFund().treasurer == me, "el maestro crea la colecta: 100 de oro, tesorero él")
+	-- Intercambio: el otro pone oro y yo nada -> cuenta. Si yo doy algo (un encargo), no.
+	ns.OnTradeComplete({ partner = "Ana Sol", getMoney = 300000, giveMoney = 0, give = {}, get = {} })
+	ns.OnTradeComplete({ partner = "Ana Sol", getMoney = 50000, giveMoney = 0, give = { [2589] = { count = 1 } }, get = {} })
+	ns.OnTradeComplete({ partner = "Desconocido Fuera", getMoney = 50000, give = {} })
+	local st = ns.BankFundState(g)
+	assert(st.total == 300000 and #st.donors == 1, "solo cuenta el oro sin nada a cambio y de miembros")
+	-- Correo: se apunta al recoger el oro, una sola vez aunque se recoja por dos caminos.
+	local savedHeader, savedNum = GetInboxHeaderInfo, GetInboxNumItems
+	GetInboxNumItems = function() return 2 end
+	GetInboxHeaderInfo = function(i)
+		if i == 1 then return nil, nil, "Ana Sol", "Para el banco", 800000, 0, 29, false, true, false end
+		return nil, nil, "Ana Sol", "Devuelta", 500000, 0, 29, false, true, true -- devuelta: no cuenta
+	end
+	ns.FundReadInbox()
+	ns.FundTookMailMoney(1)
+	ns.FundReadInbox()
+	ns.FundTookMailMoney(1)
+	ns.FundTookMailMoney(2)
+	GetInboxHeaderInfo, GetInboxNumItems = savedHeader, savedNum
+	st = ns.BankFundState(g)
+	assert(st.total == 1100000 and st.reachedAt and st.surplus == 100000, "correo sumado una vez: 110 de oro, meta cumplida y 10 de sobrante")
+	assert(ns.IsBankFounder("Ana Sol"), "quien aporta es fundador")
+	-- Puntos: 2 de reputación y 2 insignias por oro.
+	local entries = ns.BankFundEntries(g)
+	local rep = 0
+	for _, e in ipairs(entries) do rep = rep + e.rep end
+	assert(rep == 220, "220 de reputación por 110 de oro")
+	-- Logro de hermandad.
+	ns.InvalidateAchievements()
+	local ach = ns.AchievementState().byId.bankFund
+	assert(ach and ach.doneAt == st.reachedAt, "logro «Las arcas» cumplido al llegar a la meta")
+	-- Nadie más puede apuntar aportaciones en nombre del tesorero.
+	assert(not ns.MergeFundGift(g, { id = "x", t = ns.Now(), member = "Ana Sol", amount = 10000, via = "trade", by = me }, "Ana Sol"),
+		"una aportación solo la manda quien la apunta")
+	local fake = { id = "Ana Sol:fund", t = ns.Now(), member = "Otro Oficial", amount = 990000, via = "trade", by = "Ana Sol" }
+	assert(ns.MergeFundGift(g, fake, "Ana Sol") and ns.BankFundState(g).total == 1100000, "si no es el tesorero, no cuenta")
+	local n = 0
+	for _, k in ipairs(sentKinds) do if k == "FUNDGIFT" then n = n + 1 end end
+	assert(n == 2, "se comparten las dos aportaciones")
+	g.fundGifts, g.settings.bankFund, ns.IsGuildMaster, LG.Send = saved.gifts, saved.setting, saved.gm, savedSend
+	ns.roster["Otro Oficial"] = nil
+	ns.InvalidateAchievements()
+	print_("OK colecta del banco: intercambio y correo, puntos, logro, fundadores y solo el tesorero apunta")
+end
+
+-- Lista de miembros: ordenar y ocultar desconectados no rompe la vista.
+do
+	local p = LG.db.profile
+	for _, key in ipairs({ "name", "level", "rank", "merits", "zone" }) do
+		p.memberSort, p.memberSortDesc, p.hideOffline = key, key == "level", key == "zone"
+		ns.SelectSubview("guild", "members")
+	end
+	p.memberSort, p.memberSortDesc, p.hideOffline = nil, nil, nil
+	ns.SelectSubview("guild", "members")
+	print_("OK lista de miembros: cinco órdenes y ocultar desconectados")
 end
 
 -- Mensaje de muerte con honor: todas las variantes del juego (con rango y sin él); uno desconocido se guarda.

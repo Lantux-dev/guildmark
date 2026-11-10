@@ -85,6 +85,7 @@ local defaults = {
 				bankRequests = {}, -- [id] = pedido del banco: objeto, cantidad y recompensa del cofre (GuildBank.lua)
 				bankSnap = {},     -- foto del contenido del banco del juego: { tabs = { [n] = pestaña }, money } (BankVault.lua)
 				bankAsks = {},     -- [id] = petición de un miembro para sacar algo del banco (BankVault.lua)
+				fundGifts = {},    -- [id] = oro dado al tesorero para la colecta del banco (BankFund.lua)
 			},
 		},
 	},
@@ -312,19 +313,133 @@ end
 -- sobre LG: AceEvent guarda UN solo manejador por objeto y mensaje, así que la
 -- segunda ventana que se registraba dejaba a la primera sin refrescar.
 local dataListeners = {}
-function ns.OnDataChanged(fn)
-	dataListeners[#dataListeners + 1] = fn
+function ns.OnDataChanged(fn, name)
+	dataListeners[#dataListeners + 1] = { fn = fn, name = name or ("ventana " .. (#dataListeners + 1)) }
 end
 
-function LG:DataChanged()
-	if ns.InvalidateScores then ns.InvalidateScores() end
-	if ns.InvalidateAchievements then ns.InvalidateAchievements() end
-	for _, fn in ipairs(dataListeners) do
+---------------------------------------------------------------------------
+-- Rendimiento: cuánto tarda cada parte pesada (/gmk rendimiento). Siempre activo:
+-- medir cuesta casi nada y así el informe cubre toda la sesión.
+---------------------------------------------------------------------------
+local clock = debugprofilestop or function() return 0 end
+local perf = { since = nil, data = {} }
+local SPIKE_MS = 20 -- a partir de aquí se nota como un tirón
+
+function ns.PerfStart() return clock() end
+function ns.PerfStop(label, t0)
+	local ms = clock() - t0
+	local d = perf.data[label]
+	if not d then
+		d = { n = 0, total = 0, max = 0, spikes = 0 }
+		perf.data[label] = d
+	end
+	d.n, d.total = d.n + 1, d.total + ms
+	if ms > d.max then d.max = ms end
+	if ms >= SPIKE_MS then d.spikes = d.spikes + 1 end
+	return ms
+end
+-- Mide fn(...) con la etiqueta dada y devuelve lo que devuelva.
+function ns.Measure(label, fn, ...)
+	local t0 = clock()
+	local a, b, c = fn(...)
+	ns.PerfStop(label, t0)
+	return a, b, c
+end
+
+function ns.PerfReport()
+	local rows = {}
+	for label, d in pairs(perf.data) do rows[#rows + 1] = { label = label, d = d } end
+	table.sort(rows, function(x, y) return x.d.total > y.d.total end)
+	local mins = math.max(1, (GetTime() - (perf.since or GetTime())) / 60)
+	LG:Print((L["Rendimiento en los últimos %d min (lo que más tiempo se lleva primero):"]):format(math.floor(mins + 0.5)))
+	for i = 1, math.min(12, #rows) do
+		local r, d = rows[i], rows[i].d
+		local line = (L["%s: %d veces, %.0f ms en total, %.1f ms de media, máx %.0f ms"]):format(r.label, d.n, d.total, d.total / d.n, d.max)
+		if d.spikes > 0 then line = line .. " |cffff6060" .. (L["(%d tirones)"]):format(d.spikes) .. "|r" end
+		LG:Print("  " .. line)
+	end
+	if #rows == 0 then LG:Print("  " .. L["Aún no hay medidas."]) end
+	if ns.ledgerSize then LG:Print("  " .. (L["Historial de puntos: %d apuntes."]):format(ns.ledgerSize)) end
+end
+
+-- Envuelve las funciones pesadas que se llaman por su nombre (ns.X o métodos de módulo).
+local function perfFinish(label, t0, ...)
+	ns.PerfStop(label, t0)
+	return ...
+end
+local function wrap(tbl, key, label)
+	local fn = tbl and tbl[key]
+	if type(fn) ~= "function" then return end
+	tbl[key] = function(...) return perfFinish(label, clock(), fn(...)) end
+end
+function ns.InstallPerfWraps()
+	if ns.perfWrapped then return end
+	ns.perfWrapped = true
+	wrap(ns, "Scores", "puntos")
+	wrap(ns, "AchievementState", "logros (cálculo)")
+	wrap(ns, "CheckBossStats", "estadísticas de jefes")
+	wrap(ns, "BadgeData", "insignias del retrato")
+	local function mod(name) return LG.GetModule and LG:GetModule(name, true) end
+	wrap(mod("Achievements"), "Check", "logros (revisión)")
+	wrap(mod("Roster"), "Update", "lista de la hermandad")
+	wrap(mod("Roster"), "Request", "lista de la hermandad (pedir)")
+	wrap(mod("Activity"), "Report", "actividad")
+	wrap(mod("Aid"), "Tick", "auxilio")
+	wrap(mod("Wars"), "Tick", "guerras")
+	wrap(mod("Layer"), "Tick", "capa")
+	wrap(mod("Network"), "Tick", "red de hermandades")
+	wrap(mod("Events"), "Tick", "eventos")
+	wrap(mod("Auction"), "CheckEnds", "subastas")
+	wrap(mod("Hunt"), "ShareCache", "caché de hermandades")
+	wrap(mod("Hunt"), "COMBAT_LOG_EVENT_UNFILTERED", "registro de combate")
+	wrap(mod("Integrity"), "InspectSomeone", "inspección")
+	wrap(LG, "Prune", "limpieza")
+end
+
+function ns.PerfReset()
+	wipe(perf.data)
+	perf.since = GetTime()
+end
+
+-- Los cambios de datos llegan a ráfagas (cada mensaje de la hermandad es uno) y cada
+-- refresco recalcula puntos, logros y ventanas. Se agrupan: se invalida al momento,
+-- pero se repinta como mucho una vez por segundo (cada 3 s en combate). El primero
+-- tras un rato de calma va al momento, para que un clic se vea enseguida.
+local REFRESH_EVERY, REFRESH_EVERY_COMBAT = 1, 3
+local refreshPending, lastFlush = false, -math.huge
+
+function LG:FlushDataChanged()
+	refreshPending = false
+	lastFlush = GetTime()
+	local t0 = clock()
+	for _, l in ipairs(dataListeners) do
 		-- Un error en una ventana no deja sin refrescar a las demás.
-		local ok, err = pcall(fn)
+		local t1 = clock()
+		local ok, err = pcall(l.fn)
+		ns.PerfStop("refresco: " .. l.name, t1)
 		if not ok and geterrorhandler then geterrorhandler()(err) end
 	end
 	self:SendMessage("LANTUX_DATA_CHANGED")
+	ns.PerfStop("refresco (todo)", t0)
+end
+
+-- light = true: lo que ha cambiado no cuenta para puntos ni logros (actividad, caché de
+-- hermandades vistas, quién está conectado): se repinta sin recalcularlos, que es lo caro.
+-- light = "achievements": solo cuenta para logros (la ficha de un miembro sin cambio de nivel).
+function LG:DataChanged(light)
+	if not light then
+		if ns.InvalidateScores then ns.InvalidateScores() end
+	end
+	if not light or light == "achievements" then
+		if ns.InvalidateAchievements then ns.InvalidateAchievements() end
+	end
+	if ns.SYNC_DATA_CHANGED then return self:FlushDataChanged() end -- pruebas
+	if refreshPending then return end
+	local every = (InCombatLockdown and InCombatLockdown()) and REFRESH_EVERY_COMBAT or REFRESH_EVERY
+	local wait = lastFlush + every - GetTime()
+	if wait <= 0 then return self:FlushDataChanged() end
+	refreshPending = true
+	self:ScheduleTimer("FlushDataChanged", wait)
 end
 
 -- Los módulos añaden sus campos al registro propio con esta lista de funciones.
@@ -498,6 +613,8 @@ function LG:OnEnable()
 	ns.RegisterEvent(self, "PLAYER_GUILD_UPDATE", "RememberCharacter")
 	ns.RegisterEvent(self, "GROUP_ROSTER_UPDATE")
 	ns.UpdateMinimapButton()
+	ns.PerfReset()
+	ns.InstallPerfWraps()
 end
 
 -- En modo prueba la "hermandad" cambia al entrar alguien en el grupo: se vuelve a sincronizar.
@@ -1048,6 +1165,7 @@ local HELP = {
 	L["/gmk red - estado de la red de hermandades"],
 	L["/gmk insignias - mostrar u ocultar las insignias sobre el marco de jugador"],
 	L["/gmk errores - ver y copiar los errores del addon para avisar de un fallo"],
+	L["/gmk rendimiento - ver qué partes del addon gastan más tiempo (reset para empezar de cero)"],
 	L["/gmk aviso - ver cómo queda el cartel de logro de hermandad (solo lo ves tú)"],
 	L["/gmk debug - mensajes de depuración"],
 }
@@ -1059,6 +1177,7 @@ local COMMAND_ALIASES = {
 	target = "objetivo", test = "prueba", profile = "perfil", war = "guerra", network = "red", badges = "insignias",
 	errors = "errores", error = "errores", bugs = "errores", fallos = "errores",
 	toast = "aviso", alert = "aviso",
+	performance = "rendimiento", perf = "rendimiento", cpu = "rendimiento",
 }
 
 function LG:SlashCommand(input)
@@ -1148,6 +1267,13 @@ function LG:SlashCommand(input)
 		end
 		self:SendMessage("LANTUX_GUILD_CHANGED")
 		self:DataChanged()
+	elseif cmd == "rendimiento" then
+		if arg == "reset" or arg == "borrar" then
+			ns.PerfReset()
+			self:Print(L["Medidas de rendimiento a cero."])
+		else
+			ns.PerfReport()
+		end
 	elseif cmd == "errores" then
 		-- /gmk errores prueba: provoca un error a propósito, para comprobar que se registra.
 		if arg == "prueba" or arg == "test" then ns.TestError() else ns.ShowErrors() end

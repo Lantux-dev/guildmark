@@ -10,7 +10,9 @@
 --   CACHE   lote de hermandades vistas de otros jugadores
 --   HELLO   "acabo de entrar; esto es lo último que tengo"
 --   CLAIM   "yo respondo a ese HELLO", para que no respondan todos
---   SYNC    respuesta a un HELLO, por susurro
+--   SYNC    respuesta a un HELLO, por susurro (con resumen por informante y día)
+--   FILL    lo que a quien respondió le faltaba según ese resumen, por susurro
+--   FUNDS   la colecta del banco, del tesorero a quien entra sin ella (Modules/BankFund.lua)
 --   FORGET  un miembro pide que se borren sus datos
 -- Los de cada módulo (ORDER, EVENT, SIGNUP, ATTEND, ADJUST, TARGET, AUCTION,
 -- BID, SPEND, VOID, SETTING, WAR, WARREP) están descritos en su archivo.
@@ -22,7 +24,7 @@ local LG = ns.LG
 local PREFIX = "LantuxGuild"
 ns.COMM_PREFIX = PREFIX
 local PROTOCOL = 1
-local SYNC_MAX_KILLS = 300
+local SYNC_MAX_KILLS = 500
 local SYNC_MAX_RUNS = 200
 local SYNC_MAX_CACHE = 500
 
@@ -69,9 +71,76 @@ function LG:Send(kind, data, channel, target, prio)
 		self:Debug("no se pudo empaquetar", kind, serialized)
 		return
 	end
+	local t0 = ns.PerfStart()
 	local encoded = LibDeflate:EncodeForWoWAddonChannel(LibDeflate:CompressDeflate(serialized))
+	ns.PerfStop("enviar: comprimir", t0)
 	self:SendCommMessage(PREFIX, encoded, channel, target, prio or "NORMAL")
 	self:Debug("->", kind, channel, target or "", #encoded .. "b")
+end
+
+-- Envíos grandes (SYNC, FILL) en trozos. Comprimir de una vez todo el estado de una
+-- hermandad grande (cientos de bajas, la caché, el banco...) pasaba del tiempo que el
+-- juego deja a un script ("script ran too long" en LibDeflate). Cada trozo se comprime
+-- y se envía en su propio momento. Los manejadores fusionan registro a registro, así
+-- que da igual en cuántos mensajes llegue.
+local PART_SIZE = 12000 -- tamaño aproximado (sin comprimir) de cada trozo
+local NO_SPLIT = { bankSnap = true, killDigest = true, runDigest = true } -- se leen enteras
+
+local function sizeOf(v, depth)
+	local tv = type(v)
+	if tv == "string" then return #v + 2 end
+	if tv ~= "table" then return 9 end
+	if (depth or 0) > 6 then return 64 end
+	local n = 2
+	for k, x in pairs(v) do n = n + sizeOf(k, 7) + sizeOf(x, (depth or 0) + 1) end
+	return n
+end
+
+local function splitPayload(data)
+	local parts, cur, curSize = {}, {}, 0
+	local function flush()
+		if next(cur) then parts[#parts + 1] = cur end
+		cur, curSize = {}, 0
+	end
+	for key, value in pairs(data) do
+		local size = sizeOf(value)
+		if size <= PART_SIZE or type(value) ~= "table" or NO_SPLIT[key] then
+			if curSize + size > PART_SIZE then flush() end
+			cur[key] = value
+			curSize = curSize + size
+		else
+			-- Colección grande: en trozos, como lista o con sus claves según venga.
+			local isList = #value > 0
+			local chunk, chunkSize = {}, 0
+			for k, v in pairs(value) do
+				local s = sizeOf(v) + sizeOf(k, 7)
+				if chunkSize + s > PART_SIZE and next(chunk) then
+					parts[#parts + 1] = { [key] = chunk }
+					chunk, chunkSize = {}, 0
+				end
+				if isList then chunk[#chunk + 1] = v else chunk[k] = v end
+				chunkSize = chunkSize + s
+			end
+			if next(chunk) then parts[#parts + 1] = { [key] = chunk } end
+		end
+	end
+	flush()
+	return parts
+end
+ns.SplitPayload = splitPayload
+
+function LG:SendParts(kind, data, channel, target, prio)
+	local parts = splitPayload(data)
+	for i, part in ipairs(parts) do
+		-- Numerados: quien recibe sabe cuándo ha llegado el último.
+		part._part, part._parts = i, #parts
+		if i == 1 then
+			self:Send(kind, part, channel, target, prio)
+		else
+			self:ScheduleTimer(function() self:Send(kind, part, channel, target, prio) end, (i - 1) * 0.3)
+		end
+	end
+	return #parts
 end
 
 function LG:OnCommReceived(prefix, encoded, distribution, sender)
@@ -87,10 +156,12 @@ function LG:OnCommReceived(prefix, encoded, distribution, sender)
 	if distribution ~= "GUILD" and distribution ~= "PARTY" and distribution ~= "RAID" and distribution ~= "WHISPER" then return end
 	if distribution == "WHISPER" and not ns.IsGuildMember(sender) then return end
 
+	local t0 = ns.PerfStart()
 	local compressed = LibDeflate:DecodeForWoWAddonChannel(encoded)
 	local serialized = compressed and LibDeflate:DecompressDeflate(compressed)
 	if not serialized then return end
 	local ok, msg = LibSerialize:Deserialize(serialized)
+	ns.PerfStop("recibir: descomprimir", t0)
 	if not ok or type(msg) ~= "table" or type(msg.d) ~= "table" then return end
 	-- El canal del grupo solo se usa en modo prueba, donde el grupo hace de hermandad;
 	-- y en modo prueba se ignora todo lo que llegue de la hermandad real.
@@ -111,7 +182,9 @@ function LG:OnCommReceived(prefix, encoded, distribution, sender)
 		self.lastRawSenders[sender] = rawSender
 		-- Para "Sincronizado hace X con Fulano" en Inicio.
 		self.lastHeard = { from = sender, t = ns.Now() }
+		local t1 = ns.PerfStart()
 		handler(sender, msg.d, distribution, rawSender)
+		ns.PerfStop("recibir: " .. tostring(msg.k), t1)
 	end
 end
 
@@ -190,6 +263,9 @@ function ns.ForgetMember(g, name, guid)
 	for id, p in pairs(g.purchases or {}) do
 		if p.member == name then g.purchases[id] = nil end
 	end
+	for id, f in pairs(g.fundGifts or {}) do
+		if f.member == name then g.fundGifts[id] = nil end
+	end
 	for id, a in pairs(g.bankAsks or {}) do
 		if a.requester == name then g.bankAsks[id] = nil end
 	end
@@ -214,10 +290,16 @@ local function withGuild(fn)
 	end
 end
 
-ns.handlers.ME = withGuild(function(g, sender, rec)
-	if rec.name ~= sender then return false end
-	return ns.MergeMember(g, rec)
-end)
+-- La ficha llega cada pocos minutos. Para los puntos solo cuenta el nivel (y los niveles
+-- subidos): si no cambian, solo se recalculan los logros, que es mucho más barato.
+ns.handlers.ME = function(sender, rec)
+	local g = LG:GuildData()
+	if not g or type(rec) ~= "table" or rec.name ~= sender then return end
+	local old = g.members[rec.name]
+	local function nLevels(m) return type(m.levels) == "table" and #m.levels or 0 end
+	local sameForPoints = old and old.level == rec.level and nLevels(old) == nLevels(rec)
+	if ns.MergeMember(g, rec) then LG:DataChanged(sameForPoints and "achievements" or nil) end
+end
 
 ns.handlers.KILL = withGuild(function(g, sender, rec)
 	if rec.reporter ~= sender then return false end
@@ -231,9 +313,11 @@ ns.handlers.RUN = withGuild(function(g, sender, rec)
 	return ns.MergeRun(g, rec)
 end)
 
-ns.handlers.CACHE = withGuild(function(g, sender, entries)
-	return ns.MergeCache(g, entries)
-end)
+-- La caché de hermandades vistas no cuenta para puntos ni logros: refresco ligero.
+ns.handlers.CACHE = function(sender, entries)
+	local g = LG:GuildData()
+	if g and type(entries) == "table" and ns.MergeCache(g, entries) then LG:DataChanged(true) end
+end
 
 ns.handlers.FORGET = withGuild(function(g, sender, data)
 	if data.name ~= sender then return false end
@@ -294,6 +378,9 @@ ns.handlers.SYNC = withGuild(function(g, sender, data, distribution)
 	end
 	for _, rec in pairs(data.bankRequests or {}) do
 		if type(rec) == "table" then changed = ns.MergeBankRequest(g, rec) or changed end
+	end
+	for _, rec in pairs(data.fundGifts or {}) do
+		if type(rec) == "table" then changed = ns.MergeFundGift(g, rec) or changed end
 	end
 	for _, rec in pairs(data.bankAsks or {}) do
 		if type(rec) == "table" then changed = ns.MergeBankAsk(g, rec) or changed end
@@ -359,7 +446,30 @@ ns.handlers.SYNC = withGuild(function(g, sender, data, distribution)
 	end
 	changed = ns.MergeCache(g, data.cache or {}) or changed
 	LG:Debug("sync de", sender, "aplicado")
-	LG.lastSync = { from = sender, t = ns.Now() }
+	-- La sincronización cuenta como hecha cuando llega el último trozo (los logros
+	-- esperan a tenerla entera para no anunciar como nuevos los que ya había).
+	if type(data._parts) ~= "number" or data._part == data._parts then
+		LG.lastSync = { from = sender, t = ns.Now() }
+	end
+	-- Lo que tengo yo y a quien me contesta le falta, se lo devuelvo.
+	if type(data.killDigest) == "table" or type(data.runDigest) == "table" then
+		local kills = type(data.killDigest) == "table" and ns.SyncMissing(g.kills, data.killDigest, nil, SYNC_MAX_KILLS) or {}
+		local runs = type(data.runDigest) == "table" and ns.SyncMissing(g.runs, data.runDigest, nil, SYNC_MAX_RUNS) or {}
+		if #kills > 0 or #runs > 0 then
+			local target = LG.lastRawSenders and LG.lastRawSenders[sender] or sender
+			LG:SendParts("FILL", { kills = kills, runs = runs }, "WHISPER", target, "BULK")
+		end
+	end
+	return changed
+end)
+
+-- FILL: registros que me faltaban, devueltos por quien acaba de entrar tras mi SYNC.
+ns.handlers.FILL = withGuild(function(g, sender, data, distribution)
+	if distribution ~= "WHISPER" or type(data) ~= "table" then return false end
+	local changed = false
+	for _, rec in pairs(data.kills or {}) do changed = ns.MergeKill(g, rec) or changed end
+	for _, rec in pairs(data.runs or {}) do changed = ns.MergeRun(g, rec) or changed end
+	LG:Debug("fill de", sender, "aplicado")
 	return changed
 end)
 
@@ -399,6 +509,45 @@ local function newerThan(tbl, since, max)
 	return list
 end
 
+-- Resumen por informante y día (los últimos DIGEST_DAYS): cuántos registros tengo de cada uno.
+-- Comparando resúmenes se ven los huecos de cualquier fecha, no solo lo posterior al último.
+local DIGEST_DAYS = 21
+local function digest(tbl)
+	local by, since = {}, ns.Now() - DIGEST_DAYS * 86400
+	for _, rec in pairs(tbl) do
+		local t = rec.t or 0
+		if t >= since then
+			local who, day = rec.reporter or "?", math.floor(t / 86400)
+			by[who] = by[who] or {}
+			by[who][day] = (by[who][day] or 0) + 1
+		end
+	end
+	return by
+end
+ns.SyncDigest = digest
+
+-- Los registros de los días (por informante) en los que tengo más que el otro según su resumen,
+-- más los posteriores a su último de cada uno; los más recientes primero, como mucho max.
+local function missingFor(tbl, theirs, newestBy, max)
+	local mine, since = digest(tbl), ns.Now() - DIGEST_DAYS * 86400
+	local list = {}
+	for _, rec in pairs(tbl) do
+		local t, who = rec.t or 0, rec.reporter or "?"
+		local add
+		if t >= since then
+			local day = math.floor(t / 86400)
+			local other = type(theirs[who]) == "table" and tonumber(theirs[who][day]) or 0
+			add = mine[who][day] > other
+		end
+		if not add and type(newestBy) == "table" then add = t > (tonumber(newestBy[who]) or 0) end
+		if add then list[#list + 1] = rec end
+	end
+	table.sort(list, function(a, b) return a.t > b.t end)
+	for i = #list, max + 1, -1 do list[i] = nil end
+	return list
+end
+ns.SyncMissing = missingFor
+
 local function recentCache(cache, max)
 	local list = {}
 	for guid, c in pairs(cache) do list[#list + 1] = { guid = guid, t = c.t or 0 } end
@@ -412,13 +561,16 @@ function LG:StartSync()
 	local g = self:GuildData()
 	if not g then return end
 	self:SendMyRecord()
-	self:Send("HELLO", { kills = newest(g.kills), runs = newest(g.runs), killsBy = newestBy(g.kills), runsBy = newestBy(g.runs) })
+	self:Send("HELLO", { kills = newest(g.kills), runs = newest(g.runs), killsBy = newestBy(g.kills), runsBy = newestBy(g.runs),
+		killDigest = digest(g.kills), runDigest = digest(g.runs), fundCount = ns.CountFundGifts and ns.CountFundGifts(g) or nil,
+		fundSet = g.settings and g.settings.bankFund and g.settings.bankFund.t or 0 })
 end
 
 -- Responde un solo miembro: cada uno espera un tiempo aleatorio y el primero
 -- que se adelanta anuncia un CLAIM para que los demás no repitan el envío.
 ns.handlers.HELLO = function(sender, data, _, rawSender)
 	if ns.OnHelloActivity then ns.OnHelloActivity() end -- quien llega ve enseguida qué hace cada uno
+	if ns.OnFundHello then ns.OnFundHello(sender, data, rawSender) end -- el tesorero le pasa la colecta
 	LG:ScheduleTimer(function()
 		local g = LG:GuildData()
 		if not g then return end
@@ -429,10 +581,25 @@ ns.handlers.HELLO = function(sender, data, _, rawSender)
 
 		local members = {}
 		for _, rec in pairs(g.members) do members[#members + 1] = rec end
-		LG:Send("SYNC", {
+		-- Con resumen (1.1.2+): los días que le faltan. Sin él (versiones antiguas): lo posterior a lo último.
+		local kills, runs
+		if type(data.killDigest) == "table" then
+			kills = missingFor(g.kills, data.killDigest, data.killsBy, SYNC_MAX_KILLS)
+		else
+			kills = newerThan(g.kills, type(data.killsBy) == "table" and data.killsBy or tonumber(data.kills) or 0, SYNC_MAX_KILLS)
+		end
+		if type(data.runDigest) == "table" then
+			runs = missingFor(g.runs, data.runDigest, data.runsBy, SYNC_MAX_RUNS)
+		else
+			runs = newerThan(g.runs, type(data.runsBy) == "table" and data.runsBy or tonumber(data.runs) or 0, SYNC_MAX_RUNS)
+		end
+		LG:SendParts("SYNC", {
 			members = members,
-			kills = newerThan(g.kills, type(data.killsBy) == "table" and data.killsBy or tonumber(data.kills) or 0, SYNC_MAX_KILLS),
-			runs = newerThan(g.runs, type(data.runsBy) == "table" and data.runsBy or tonumber(data.runs) or 0, SYNC_MAX_RUNS),
+			kills = kills,
+			runs = runs,
+			-- Mi resumen, para que quien entra me devuelva lo que a mí me falta (FILL).
+			killDigest = digest(g.kills),
+			runDigest = digest(g.runs),
 			cache = recentCache(g.guildCache, SYNC_MAX_CACHE),
 			orders = g.orders,
 			events = g.events,
@@ -449,6 +616,7 @@ ns.handlers.HELLO = function(sender, data, _, rawSender)
 			bankLog = g.bankLog,
 			bankRequests = g.bankRequests,
 			bankAsks = g.bankAsks,
+			fundGifts = g.fundGifts,
 			bankSnap = g.bankSnap,
 			lfg = g.lfg,
 			tribes = g.tribes,

@@ -239,6 +239,96 @@ local function askItem(data)
 	})
 end
 
+---------------------------------------------------------------------------
+-- Colecta para abrir el banco (BankFund.lua)
+---------------------------------------------------------------------------
+
+local GOLD_C, GREEN_C, R_C = "|cffffd100", "|cff1eff00", "|r"
+local FUND_ICON = "Interface\\Icons\\INV_Misc_Coin_17"
+
+local function fundDialog(st)
+	local fund = st.fund
+	ns.ShowInputDialog({
+		title = fund and L["Editar la colecta"] or L["Crear la colecta del banco"],
+		text = L["Cuánto oro hace falta y quién lo guarda. Los miembros le dan el oro al tesorero por intercambio o por correo y su addon lo apunta solo."],
+		submit = L["Guardar"],
+		fields = {
+			{ key = "goal", label = L["Oro"], width = 70, numeric = true, default = math.floor((fund and fund.goal or ns.FUND_DEFAULT_GOAL) / 10000) },
+			{ key = "treasurer", label = L["Tesorero"], width = 160, maxLetters = 40, default = ns.ShortName(fund and fund.treasurer or ns.PlayerFullName()) },
+		},
+		onSubmit = function(v)
+			local who = ns.FindMember(v.treasurer or "")
+			if not who then return L["No encuentro a ese miembro."] end
+			local ok, err = ns.SetBankFund(tonumber(v.goal), who)
+			if not ok then return err end
+		end,
+	})
+end
+
+local function fundHelp(st)
+	ns.ShowInputDialog({
+		title = L["Donar a la colecta"],
+		text = (L["Dale el oro a %s por intercambio (sin poner nada a cambio) o por correo. Su addon lo apunta y la barra sube para todos.\n\nCada moneda de oro te da %d de reputación y %d insignias, y quedas como fundador del banco."])
+			:format(ns.ShortName(st.fund.treasurer), ns.FUND_REWARD.rep, ns.FUND_REWARD.merits),
+		submit = L["Entendido"],
+		fields = {},
+		onSubmit = function() end,
+	})
+end
+
+local function donorLines(k, rows, st, max)
+	for i = 1, math.min(max, #st.donors) do
+		local d = st.donors[i]
+		local m = LG:GuildData().members[d.name] or ns.roster[d.name]
+		k.line(rows, ("%s%d.|r  %s  %s"):format(i <= 3 and GOLD_C or "|cff9d9d9d", i, ns.ClassColorName(d.name, m and m.class), GREEN_C .. ns.MoneyText(d.amount) .. R_C), 1)
+	end
+end
+
+-- Mientras no hay banco: la colecta (o el botón para crearla, si eres el maestro).
+local function fundView(g, rows)
+	local k = K()
+	local st = ns.BankFundState(g)
+	local gm = ns.IsGuildMaster(ns.PlayerFullName())
+	if not st.fund then
+		if gm then
+			k.line(rows, k.grey(L["La hermandad todavía no tiene banco. Puedes abrir una colecta de oro para comprarlo entre todos."]), 1, {
+				tall = true, buttons = { { label = L["Crear colecta"], onClick = function() fundDialog(st) end } } })
+		end
+		return
+	end
+	k.space(rows)
+	local buttons = { { label = L["Cómo donar"], onClick = function() fundHelp(st) end } }
+	if gm then buttons[#buttons + 1] = { label = L["Editar"], onClick = function() fundDialog(st) end } end
+	k.header(rows, L["Colecta para abrir el banco"], buttons)
+	rows[#rows + 1] = {
+		kind = "card", state = st.reachedAt and "done" or "normal", accent = { 0.85, 0.65, 0.1 }, icon = FUND_ICON,
+		title = GOLD_C .. (st.reachedAt and L["¡Colecta completa!"] or L["Abramos el banco de la hermandad"]) .. R_C,
+		desc = (L["Tesorero: %s  ·  %d fundadores"]):format(ns.ShortName(st.fund.treasurer), #st.donors),
+		foot = k.grey(st.reachedAt and L["El tesorero ya puede comprar la primera pestaña. Lo que sobra va al banco."]
+			or (L["Faltan %s. Dale el oro al tesorero por intercambio o correo."]):format(ns.MoneyText(st.goal - st.total))),
+	}
+	rows[#rows + 1] = { kind = "bar", label = L["Oro reunido"], value = math.min(st.total, st.goal), max = st.goal,
+		text = ("%s / %s"):format(ns.MoneyText(st.total), ns.MoneyText(st.goal)) }
+	if st.surplus > 0 then
+		k.line(rows, (L["Sobrante: %s (irá al banco)."]):format(GREEN_C .. ns.MoneyText(st.surplus) .. R_C), 1)
+	end
+	if #st.donors > 0 then
+		k.line(rows, GOLD_C .. L["Fundadores"] .. R_C, 1)
+		donorLines(k, rows, st, 10)
+	end
+end
+
+-- Con el banco ya abierto: la placa de los fundadores, para siempre.
+local function foundersPlaque(g, rows)
+	local k = K()
+	local st = ns.BankFundState(g)
+	if #st.donors == 0 then return end
+	k.space(rows)
+	k.header(rows, L["Fundadores del banco"])
+	k.line(rows, k.grey((L["%s reunidos entre %d miembros para abrir el banco de la hermandad."]):format(ns.MoneyText(st.total), #st.donors)), 1)
+	donorLines(k, rows, st, 25)
+end
+
 local function contentsView(g, rows)
 	local k = K()
 	local tabs = ns.BankTabs()
@@ -246,6 +336,7 @@ local function contentsView(g, rows)
 	k.header(rows, L["Banco de la hermandad"])
 	if #tabs == 0 then
 		k.line(rows, k.grey(L["Todavía no hay foto del banco. Se hace sola cuando alguien con el addon abre el banco de la hermandad en el juego."]), 1, { tall = true })
+		fundView(g, rows)
 		return
 	end
 	local found = false
@@ -258,6 +349,7 @@ local function contentsView(g, rows)
 		onItem = askItem,
 	}
 	k.line(rows, k.grey(L["Es una foto: se actualiza cada vez que alguien con el addon abre el banco. Cada pestaña dice cuándo y quién."]), 1)
+	foundersPlaque(g, rows)
 end
 
 local STATUS = {

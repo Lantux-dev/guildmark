@@ -154,7 +154,7 @@ function ns.RefreshWarHud()
 end
 
 function WarHud:OnEnable()
-	ns.OnDataChanged(ns.RefreshWarHud)
+	ns.OnDataChanged(ns.RefreshWarHud, "marcador de guerra")
 	self:ScheduleRepeatingTimer(ns.RefreshWarHud, 5)
 	self:ScheduleTimer(ns.RefreshWarHud, 3)
 end

@@ -550,7 +550,7 @@ local function create()
 		f.sideTabs[t.key] = tab
 	end
 
-	ns.OnDataChanged(function() render() end)
+	ns.OnDataChanged(function() render() end, "ventana de logros")
 end
 
 -- Abre la ventana en una categoría (p. ej. "wars" desde JcJ › Guerras).

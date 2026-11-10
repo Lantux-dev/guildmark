@@ -86,7 +86,7 @@ function Activity:Report(force)
 	local me = ns.PlayerFullName()
 	ns.activity[me] = { kind = now.kind, zone = now.zone, instance = now.instance, group = now.group, layer = now.layer, map = now.map, since = now.since, t = ns.Now() }
 	LG:Send("ACT", ns.activity[me])
-	LG:DataChanged()
+	LG:DataChanged(true) -- la actividad no cuenta para puntos ni logros
 end
 
 local KINDS = { dungeon = true, raid = true, bg = true, war = true, world = true }
@@ -107,7 +107,7 @@ ns.handlers.ACT = function(sender, d)
 		group = group, layer = tonumber(d.layer), map = tonumber(d.map), since = tonumber(d.since) or ns.Now(), t = ns.Now(),
 	}
 	if d.layer and ns.NoteLayer then ns.NoteLayer(d.layer, tonumber(d.map)) end
-	LG:DataChanged()
+	LG:DataChanged(true) -- la actividad no cuenta para puntos ni logros
 end
 
 -- Al leer otra capa (Layer.lua) se avisa como cualquier otro cambio.

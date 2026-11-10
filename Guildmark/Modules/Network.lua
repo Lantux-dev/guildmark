@@ -68,6 +68,8 @@ function ns.MergeSetting(g, rec, sender)
 		if not ns.IsGuildMaster(rec.by) then return false end
 		if rec.value ~= nil and (type(rec.value) ~= "number" or rec.value < 0 or rec.value > 9) then return false end
 		if rec.key == "officerMaxRank" and rec.value == nil then return false end
+	elseif rec.key == "bankFund" then
+		if not ns.IsGuildMaster(rec.by) or not (ns.ValidFundSetting and ns.ValidFundSetting(rec.value)) then return false end
 	elseif rec.key:match("^rankName:") then
 		if not ns.IsGuildMaster(rec.by) then return false end
 		if rec.value ~= nil and (type(rec.value) ~= "string" or #rec.value > 24 or rec.value:find("|", 1, true)) then return false end

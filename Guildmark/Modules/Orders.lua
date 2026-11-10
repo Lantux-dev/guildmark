@@ -342,6 +342,7 @@ function Orders:UI_INFO_MESSAGE(_, _, message)
 	if message ~= ERR_TRADE_COMPLETE or not trade or not trade.partner then return end
 	local done = trade
 	trade = nil
+	if ns.OnTradeComplete then ns.OnTradeComplete(done) end
 	self:CheckDeliveries(done)
 end
 

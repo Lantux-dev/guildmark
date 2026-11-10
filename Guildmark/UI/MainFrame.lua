@@ -423,8 +423,11 @@ views.home = function()
 	header(rows, L["Tu progreso"])
 	if nextRank then
 		line(rows, (L["Rango actual: %s%s|r"]):format(GOLD, current.label), 1)
-		rows[#rows + 1] = { kind = "bar", label = (L["Reputación hacia %s"]):format(nextRank.label), value = rep, max = nextRank.rep,
-			text = ("%d / %d"):format(rep, nextRank.rep), color = { 0.25, 0.8, 0.25 } }
+		-- La reputación no tiene tope: si ya pasa de la del rango siguiente (y falta antigüedad), se marca como cumplida.
+		local repDone = rep >= nextRank.rep
+		rows[#rows + 1] = { kind = "bar", label = (L["Reputación hacia %s"]):format(nextRank.label), value = math.min(rep, nextRank.rep), max = nextRank.rep,
+			text = repDone and ((L["%d de reputación (pide %d)"]):format(rep, nextRank.rep) .. " |TInterface\\RaidFrame\\ReadyCheck-Ready:14|t")
+				or ("%d / %d"):format(rep, nextRank.rep), color = { 0.25, 0.8, 0.25 } }
 		if LG:InTestMode() then
 			line(rows, grey(L["Modo prueba: no se exige antigüedad para subir de rango."]), 1)
 		else
@@ -2624,6 +2627,10 @@ local function memberCard(g, name, rows)
 		{ buttons = { { label = L["Ver perfil"], onClick = function() ns.ToggleProfile(name) end } } })
 	line(rows, ("%s %s%s|r  ·  %d rep  ·  %s%d|r %s  ·  %s"):format(L["Rango"], GOLD, rank.label, rep, GREEN, s.merits, L["insignias"],
 		grey((L["idioma %s"]):format(m.locale or "?"))), 2)
+	local founder, gave = ns.IsBankFounder and ns.IsBankFounder(name)
+	if founder then
+		line(rows, ("|TInterface\\Icons\\INV_Misc_Coin_17:14|t %s%s|r  %s"):format(GOLD, L["Fundador del banco"], grey("(" .. ns.MoneyText(gave) .. ")")), 2)
+	end
 	local profs = {}
 	for _, p in pairs(m.prof or {}) do profs[#profs + 1] = ("%s %d/%d"):format(p.name or "?", p.rank or 0, p.max or 0) end
 	table.sort(profs)
@@ -2680,11 +2687,45 @@ local function membersView(g, rows)
 			end
 		end
 	end
+	-- Orden y filtro elegidos (se recuerdan): clic en el mismo criterio invierte el sentido.
+	local p = LG.db.profile
+	local sortKey, sortDesc, hideOffline = p.memberSort or "name", p.memberSortDesc and true or false, p.hideOffline and true or false
+	if hideOffline then
+		for i = #list, 1, -1 do if not list[i].r.online then table.remove(list, i) end end
+	end
+	local scores = ns.Scores()
+	local function value(e)
+		if sortKey == "level" then return tonumber(e.r.level) or 0 end
+		if sortKey == "rank" then return -(e.r.rankIndex or 99) end -- rango más alto primero
+		if sortKey == "merits" then return scores[e.name] and scores[e.name].merits or -1 end
+		if sortKey == "zone" then return (e.r.online and e.r.zone or "\255"):lower() end
+		return e.name:lower()
+	end
+	-- Por nombre y zona, de la A a la Z; por nivel, rango e insignias, de más a menos (sortDesc invierte).
+	local ascending = (sortKey == "name" or sortKey == "zone") ~= sortDesc
 	table.sort(list, function(a, b)
 		if a.r.online ~= b.r.online then return a.r.online end
+		local va, vb = value(a), value(b)
+		if va ~= vb then
+			if ascending then return va < vb end
+			return va > vb
+		end
 		return a.name < b.name
 	end)
-	header(rows, (#list == 1 and L["%d miembro · %d conectados · %d con el addon"] or L["%d miembros · %d conectados · %d con el addon"]):format(#list, online, withAddon))
+	header(rows, (#list == 1 and L["%d miembro · %d conectados · %d con el addon"] or L["%d miembros · %d conectados · %d con el addon"]):format(#list, online, withAddon),
+		{ { label = hideOffline and L["Ver desconectados"] or L["Ocultar desconectados"], onClick = function() p.hideOffline = not hideOffline; refresh() end } })
+	local sortButtons = {}
+	for _, s in ipairs({ { "name", L["Nombre"] }, { "level", L["Nivel"] }, { "rank", L["Rango"] }, { "merits", L["Insignias"] }, { "zone", L["Zona"] } }) do
+		local active = sortKey == s[1]
+		sortButtons[#sortButtons + 1] = {
+			label = active and (GOLD .. s[2] .. (ascending and " |TInterface\\Buttons\\Arrow-Up-Up:12|t" or " |TInterface\\Buttons\\Arrow-Down-Up:12|t") .. R) or s[2],
+			onClick = function()
+				if active then p.memberSortDesc = not sortDesc else p.memberSort, p.memberSortDesc = s[1], false end
+				refresh()
+			end,
+		}
+	end
+	line(rows, grey(L["Ordenar por:"]), 1, { buttons = sortButtons })
 	rows[#rows + 1] = { indent = 0, iconSpacer = 26, cols = { { grey(L["Nombre"]), 200 }, { grey(L["Nv"]), 34 }, { grey(L["Rango"]), 120 },
 		{ grey(L["Insignias"]), 70 }, { grey(L["Zona"]), 120 }, { grey(L["Capa"]), 50 } } }
 	for _, e in ipairs(list) do
@@ -4955,7 +4996,7 @@ local function create()
 	scrollChild:SetSize(CONTENT_WIDTH, 400)
 	scroll:SetScrollChild(scrollChild)
 
-	ns.OnDataChanged(function() ns.RefreshMainFrame() end)
+	ns.OnDataChanged(function() ns.RefreshMainFrame() end, "ventana principal")
 end
 
 function ns.ToggleMainFrame()

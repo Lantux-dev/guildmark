@@ -93,6 +93,18 @@ function Roster:Update()
 			}
 		end
 	end
+	-- Si solo cambia quién está conectado o en qué zona, no hace falta recalcular puntos
+	-- ni logros (lo caro): eso solo depende de quién es miembro, su rango y su nivel.
+	local light = true
+	for name, r in pairs(fresh) do
+		local o = ns.roster[name]
+		if not o or o.rankIndex ~= r.rankIndex or o.level ~= r.level or o.class ~= r.class then light = false break end
+	end
+	if light then
+		for name in pairs(ns.roster) do
+			if not fresh[name] then light = false break end
+		end
+	end
 	ns.roster = fresh
-	LG:DataChanged()
+	LG:DataChanged(light)
 end

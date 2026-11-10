@@ -555,4 +555,4 @@ end
 
 function ns.ProfileShown() return panel and panel:IsShown() and shown or nil end
 
-ns.OnDataChanged(function() render() end)
+ns.OnDataChanged(function() render() end, "perfil")

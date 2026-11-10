@@ -489,7 +489,7 @@ function Banner:OnEnable()
 	ns.OnDataChanged(function()
 		self:UpdatePlayer()
 		if UnitExists("target") then self:UpdateTarget() end
-	end)
+	end, "insignias sobre el marco")
 	if EventRegistry and EventRegistry.RegisterCallback then
 		pcall(EventRegistry.RegisterCallback, EventRegistry, "EditMode.Exit", function() place() end, self)
 	end
