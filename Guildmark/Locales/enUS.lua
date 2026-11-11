@@ -1676,3 +1676,12 @@ L["Aún no hay medidas."] = "No measurements yet."
 L["/gmk rendimiento - ver qué partes del addon gastan más tiempo (reset para empezar de cero)"] = "/gmk performance - see which parts of the addon take the most time (reset to start over)"
 L["Medidas de rendimiento a cero."] = "Performance measurements reset."
 L["Historial de puntos: %d apuntes."] = "Points history: %d entries."
+
+-- 1.1.5: ajustes de logros
+L["Carteles de logro de hermandad en pantalla"] = "Guild achievement banners on screen"
+L["Carteles de logro"] = "Achievement banners"
+L["El cartel grande que sale al conseguir la hermandad un logro o subir de nivel. Solo te afecta a ti."] = "The big banner shown when the guild earns an achievement or levels up. Only affects you."
+L["Escribir los logros de hermandad en el chat de hermandad"] = "Post guild achievements in guild chat"
+L["Logros en el chat"] = "Achievements in chat"
+L["Lo escribe el addon de un miembro cualquiera, así que es un ajuste de la hermandad: lo cambian los oficiales. Los carteles en pantalla siguen saliendo."] = "Any member's addon may post it, so this is a guild setting changed by officers. On-screen banners still show."
+L["Logros en el chat de hermandad: %s (lo deciden los oficiales)."] = "Achievements in guild chat: %s (officers decide)."

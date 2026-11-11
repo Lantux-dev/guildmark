@@ -25,6 +25,7 @@ local defaults = {
 		debug = false,
 		testMode = false,
 		callToArms = "zone", -- "always" | "zone" | "off"
+		achToast = true, -- carteles de logro de hermandad en pantalla (Achievements.lua)
 		banner = { player = true, target = true, share = true }, -- insignias sobre los marcos (UI/Banner.lua)
 	},
 	char = {

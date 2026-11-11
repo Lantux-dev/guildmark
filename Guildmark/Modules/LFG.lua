@@ -276,7 +276,11 @@ function ns.DungeonTimes()
 		local duration = name and (r.t - r.entered)
 		if duration and duration > 60 and duration < 6 * 3600 then
 			byDungeon[name] = byDungeon[name] or {}
-			table.insert(byDungeon[name], { duration = duration, t = r.t, members = r.members or {}, guildCount = r.guildCount or 0 })
+			-- Grupo de hermandad: la misma regla que «mazmorras completadas» (Legacy.lua).
+			local witnesses = 0
+			for _ in pairs(r.witnesses or {}) do witnesses = witnesses + 1 end
+			local guildGroup = witnesses >= 2 and r.size == 5 and (r.guildCount or 0) >= 4
+			table.insert(byDungeon[name], { duration = duration, t = r.t, members = r.members or {}, guildCount = r.guildCount or 0, guildGroup = guildGroup })
 		end
 	end
 	local list = {}

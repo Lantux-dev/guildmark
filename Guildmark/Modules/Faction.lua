@@ -70,11 +70,12 @@ function ns.GuildSeasonStats()
 		s.raids[#s.raids + 1] = { key = r.key, done = r.done, total = r.total }
 	end
 	s.points = ns.AchievementState and ns.AchievementState().points or 0
-	-- Mejores tiempos de mazmorra de la temporada (los 12 más rápidos).
+	-- Mejores tiempos de mazmorra de la temporada (los 12 más rápidos), solo con grupo de
+	-- hermandad: un récord de la hermandad no vale si lo hizo un grupo de desconocidos.
 	local times = {}
 	for _, d in ipairs(ns.DungeonTimes and ns.DungeonTimes() or {}) do
 		for _, run in ipairs(d.runs) do
-			if run.t >= start then
+			if run.t >= start and run.guildGroup then
 				times[#times + 1] = { d.dungeon, run.duration }
 				break
 			end

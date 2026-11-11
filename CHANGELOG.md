@@ -1,5 +1,17 @@
 # Cambios · Changelog
 
+## 1.1.5 · 2026-11
+
+- **Fixed: guild achievement banner only showed for one member.** It appeared only on the addon that noticed the achievement first; everyone else just received it silently. Now every online member sees the banner (only for achievements earned in the last 10 minutes).
+- **New settings (Settings > Warnings):** turn off guild achievement banners on screen (personal), and stop the addon posting guild achievements in guild chat (guild setting, changed by officers).
+- **Faction records only count guild groups:** the season's best dungeon times now only count runs done with a guild group (4 or 5 from the guild), the same rule as completed dungeons. Before, a time with a group of strangers could show up as the guild's record.
+
+---
+
+- **Arreglado: el cartel de logro de hermandad solo le salía a uno.** Aparecía únicamente en el addon que se daba cuenta primero; a los demás les llegaba sin aviso. Ahora lo ven todos los conectados (solo para logros conseguidos en los últimos 10 minutos).
+- **Ajustes nuevos (Ajustes > Avisos):** quitar los carteles de logro de hermandad en pantalla (personal) y que el addon no escriba los logros de hermandad en el chat de hermandad (ajuste de hermandad, lo cambian los oficiales).
+- **Los récords de facción solo cuentan grupos de hermandad:** los mejores tiempos de mazmorra de la temporada solo cuentan las partidas hechas con grupo de hermandad (4 o 5 de la guild), la misma regla que las mazmorras completadas. Antes, un tiempo con un grupo de desconocidos podía salir como récord de la hermandad.
+
 ## 1.1.4 · 2026-11
 
 - **Fewer stutters:** every guild message (activity, guilds seen, member records...) recalculated the whole guild's points on the spot, even when it didn't affect them. Points are now only recalculated when something that counts for them changes, and refreshes are grouped (at most once per second, once every 3 seconds in combat). Working out kills on target guilds also went through the whole history for every kill; it now does a single pass and is far faster.

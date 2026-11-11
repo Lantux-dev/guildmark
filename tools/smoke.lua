@@ -1689,6 +1689,8 @@ do
 	ns.GuildAnnounce = function(t) sent[#sent + 1] = t end
 	ns.ShowAchievementToast = function() toasts = toasts + 1 end
 	ns.ShowGuildLevelToast = function() end
+	-- La prueba de clics pulsa todos los interruptores de Ajustes: se vuelven a encender.
+	LG.db.profile.achToast, g.settings.achChat = nil, nil
 	local savedAch, savedSync, savedEnabled, savedNow, savedOffset = g.achievements, LG.lastSync, A.enabledAt, NOW, GET_TIME_OFFSET
 	-- Recién instalado: hasta que llega la sincronización, nada.
 	g.achievements, LG.lastSync, A.enabledAt, A.graceTimer = {}, nil, GetTime(), nil
@@ -1713,6 +1715,36 @@ do
 	ns.handlers.ACH("Ana Sol", { id = "kills1", t = d - 100 })
 	table.remove(timers, 1)()
 	assert(#sent == 0, "otro ya lo tenía: no se anuncia")
+	assert(toasts == 1, "ya lo tenía yo: no sale otro cartel")
+	-- Lo consigue otro addon primero: el cartel sale también aquí, una vez.
+	g.achievements.kills1 = nil
+	ns.InvalidateAchievements()
+	ns.handlers.ACH("Ana Sol", { id = "kills1", t = NOW - 5 })
+	assert(toasts == 2, "logro recibido de otro: cartel")
+	ns.handlers.ACH("Otro", { id = "kills1", t = NOW - 5 })
+	A:Check()
+	assert(toasts == 2, "no se repite el cartel")
+	-- Uno antiguo que llega por mensaje: sin cartel.
+	g.achievements.kills1 = nil
+	ns.InvalidateAchievements()
+	ns.handlers.ACH("Ana Sol", { id = "kills1", t = NOW - 3600 })
+	assert(toasts == 2, "logro antiguo recibido: sin cartel")
+	while #timers > 0 do table.remove(timers, 1)() end
+	sent = {}
+	-- Ajustes: sin carteles (personal) y sin chat (de hermandad).
+	LG.db.profile.achToast = false
+	g.achievements.kills1 = nil
+	ns.InvalidateAchievements()
+	ns.handlers.ACH("Ana Sol", { id = "kills1", t = NOW - 5 })
+	assert(toasts == 2, "carteles apagados: no sale")
+	LG.db.profile.achToast = nil
+	local savedChat = g.settings.achChat
+	g.settings.achChat = { value = false, by = "x", t = 1 }
+	fresh("kills1")
+	assert(toasts == 3, "carteles encendidos: sale")
+	while #timers > 0 do table.remove(timers, 1)() end
+	assert(#sent == 0, "chat de logros apagado: no se escribe")
+	g.settings.achChat = savedChat
 	fresh("bg1")
 	table.remove(timers, 1)()
 	assert(#sent == 1 and (sent[1]:find("First Victory", 1, true) or sent[1]:find("Primera victoria", 1, true)), "logro nuevo de verdad: se anuncia")
@@ -2085,6 +2117,19 @@ do
 		end
 	end
 	assert(found, "tiempo de Sima Ígnea por su estadística (43:22)")
+	-- Récords de facción: solo con grupo de hermandad (2 testigos con el addon, 4 de la guild).
+	local function seasonTime()
+		local s = ns.GuildSeasonStats()
+		return s and s.dungeons["Sima Ígnea"]
+	end
+	local savedTime = seasonTime()
+	g.runs["stat15027:test"].duration = nil
+	g.runs["stat15027:test"].entered = NOW - 61 -- el más rápido, para que se vea si cuenta
+	assert(seasonTime() == savedTime, "un solo testigo: no es récord de la hermandad")
+	g.runs["stat15027:test"].witnesses["Ana Sol"] = true
+	assert(seasonTime() == 61, "grupo de hermandad con dos testigos: récord")
+	g.runs["stat15027:test"].guildCount = 2
+	assert(seasonTime() == savedTime, "grupo con desconocidos: no es récord de la hermandad")
 	g.runs["stat15027:test"] = nil
 	print_("OK tiempos por estadística de jefe final")
 end

@@ -2550,14 +2550,22 @@ views.settings = function()
 		buttons = { { label = L["Cambiar"], onClick = function() ns.CycleCallToArmsMode(); refresh() end } },
 	})
 	toggleRow(rows, L["Avisos de auxilio y asaltos de otras hermandades"], ns.AidSetting(), function() ns.ToggleAidSetting(); refresh() end)
+	toggleRow(rows, L["Carteles de logro de hermandad en pantalla"], ns.AchToastsOn(),
+		function() p.achToast = not ns.AchToastsOn(); refresh() end,
+		{ L["Carteles de logro"], L["El cartel grande que sale al conseguir la hermandad un logro o subir de nivel. Solo te afecta a ti."] })
 	if LG:GuildData() then
 		local on = ns.GuildSetting("guildChat", true)
 		if ns.CanManageEvents(ns.PlayerFullName()) then
 			toggleRow(rows, L["Anunciar en el chat de hermandad (subastas, pedidos, proyectos, eventos...)"], on,
 				function() ns.SetGuildSetting("guildChat", not on); refresh() end,
 				{ L["Chat de hermandad"], L["Lo escribe quien hace la acción, y lo ven también los que no tienen el addon. Es un ajuste de la hermandad: lo cambian los oficiales."] })
+			local achOn = ns.AchChatOn()
+			toggleRow(rows, L["Escribir los logros de hermandad en el chat de hermandad"], achOn,
+				function() ns.SetGuildSetting("achChat", not achOn); refresh() end,
+				{ L["Logros en el chat"], L["Lo escribe el addon de un miembro cualquiera, así que es un ajuste de la hermandad: lo cambian los oficiales. Los carteles en pantalla siguen saliendo."] })
 		else
 			line(rows, grey((L["Anuncios en el chat de hermandad: %s (lo deciden los oficiales)."]):format(on and L["sí"] or L["no"])), 1)
+			line(rows, grey((L["Logros en el chat de hermandad: %s (lo deciden los oficiales)."]):format(ns.AchChatOn() and L["sí"] or L["no"])), 1)
 		end
 	end
 

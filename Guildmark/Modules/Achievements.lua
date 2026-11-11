@@ -657,6 +657,13 @@ end
 
 local announced -- (más abajo)
 
+-- Ajuste personal: carteles en pantalla. Ajuste de hermandad (oficiales): escribir los
+-- logros en el chat; tiene que ser de hermandad porque lo escribe un addon cualquiera.
+function ns.AchToastsOn() return not (LG.db and LG.db.profile.achToast == false) end
+function ns.AchChatOn() return ns.GuildSetting("achChat", true) and true or false end
+local function toastAch(entry) if ns.AchToastsOn() and ns.ShowAchievementToast then ns.ShowAchievementToast(entry) end end
+local function toastLevel(level) if ns.AchToastsOn() and ns.ShowGuildLevelToast then ns.ShowGuildLevelToast(level) end end
+
 -- Desde cuándo (GetTime) tiene este addon cada logro. Los que ya estaban guardados al
 -- entrar cuentan como antiguos. Sirve para avisar a quien lo da por nuevo sin serlo.
 local knownSince = {}
@@ -684,9 +691,22 @@ ns.handlers.ACH = function(sender, rec)
 			LG:Send("ACHANN", { id = id })
 		end, math.random() * 0.8)
 	end
+	-- Logro recién conseguido por otro addon de la hermandad: el cartel sale también aquí
+	-- (si no, solo lo veía el primero en darse cuenta). Solo si es de verdad reciente y
+	-- este addon ya está al día (no recién instalado esperando la sincronización).
+	local toast = not old and type(rec.t) == "number" and ns.Now() - rec.t <= TOAST_WINDOW
+		and (LG.lastSync or next(g.achievements) ~= nil)
+	local levelBefore = toast and ns.GuildLevel(ns.AchievementState().points)
 	if ns.MergeAchievement(g, rec) then
 		markKnown(rec.id)
 		ns.InvalidateAchievements()
+		if toast then
+			local state = ns.AchievementState()
+			local entry = state.byId[rec.id]
+			if entry then toastAch(entry) end
+			local level = ns.GuildLevel(state.points)
+			if entry and level > levelBefore then toastLevel(level) end
+		end
 		LG:DataChanged()
 	end
 end
@@ -713,6 +733,7 @@ local function announce(entry, level)
 		local now = g and g.achievements[id]
 		if t and now and now.t < t then return end
 		announced[id] = true
+		if not ns.AchChatOn() then return end
 		LG:Send("ACHANN", { id = id })
 		local text = (L["Logro de hermandad: «%s»."]):format(entry.def.name)
 		if level then text = text .. " " .. (L["¡La hermandad sube a nivel %d!"]):format(level) end
@@ -766,10 +787,10 @@ function Achievements:Check()
 		local levelUp = level > ns.GuildLevel(state.points - newPoints) and level or nil
 		local shown = math.min(3, #newOnes)
 		for i = 1, shown do
-			if ns.ShowAchievementToast then ns.ShowAchievementToast(newOnes[i]) end
+			toastAch(newOnes[i])
 			announce(newOnes[i], i == shown and levelUp or nil)
 		end
-		if levelUp and ns.ShowGuildLevelToast then ns.ShowGuildLevelToast(levelUp) end
+		if levelUp then toastLevel(levelUp) end
 		LG:DataChanged()
 	end
 end
