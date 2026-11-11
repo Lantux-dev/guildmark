@@ -765,6 +765,76 @@ function ns.HunterBoard(days)
 	return list, streaks
 end
 
+---------------------------------------------------------------------------
+-- Cazadores de la facción (Facción > Cazadores)
+--
+-- Cada hermandad manda en su anuncio de la red (HI, cada 10 minutos) un resumen de sus
+-- mejores cazadores: los 5 primeros de cada clasificación, las rachas en curso y los récords.
+--   { kb7, kb30 = { { n, c, k, d } }, w7, w30, wt = { { n, c, v } }, hot, rec = { { n, c, v, t } } }
+---------------------------------------------------------------------------
+
+local SUMMARY_TOP = 5
+
+function ns.GuildHunterSummary()
+	local g = LG:GuildData()
+	if not g then return nil end
+	local function class(name) local m = g.members[name] return m and m.class or nil end
+	local out = {}
+	for _, days in ipairs({ 7, 30 }) do
+		local list = {}
+		for i, e in ipairs((ns.HunterBoard(days))) do
+			if i > SUMMARY_TOP then break end
+			list[i] = { n = e.name, c = class(e.name), k = e.kills, d = e.deaths }
+		end
+		out["kb" .. days] = list
+	end
+	for key, days in pairs({ w7 = 7, w30 = 30, wt = 0 }) do
+		local list = {}
+		for i, e in ipairs(ns.WorldBoard and ns.WorldBoard(g, days) or {}) do
+			if i > SUMMARY_TOP then break end
+			list[i] = { n = e.name, c = e.class, v = e.n }
+		end
+		out[key] = list
+	end
+	local hot, rec = {}, {}
+	for name, st in pairs(ns.KillStreaks(g)) do
+		if st.current >= 3 then hot[#hot + 1] = { n = name, c = class(name), v = st.current, t = st.since } end
+		if st.best >= 2 then rec[#rec + 1] = { n = name, c = class(name), v = st.best, t = st.bestAt } end
+	end
+	local function byValue(a, b) if a.v ~= b.v then return a.v > b.v end return a.n < b.n end
+	table.sort(hot, byValue)
+	table.sort(rec, byValue)
+	for i = #hot, 4, -1 do hot[i] = nil end
+	for i = #rec, SUMMARY_TOP + 1, -1 do rec[i] = nil end
+	out.hot, out.rec = hot, rec
+	return out
+end
+
+-- Lo que llega de otra hermandad, limpio.
+local SUMMARY_KEYS = { kb7 = true, kb30 = true, w7 = true, w30 = true, wt = true, hot = true, rec = true }
+function ns.SanitizeHunterSummary(d)
+	if type(d) ~= "table" then return nil end
+	local function num(v, max)
+		v = tonumber(v)
+		if not v or v ~= v then return nil end
+		return math.max(0, math.min(max or 100000, math.floor(v)))
+	end
+	local out = {}
+	for key in pairs(SUMMARY_KEYS) do
+		local list = {}
+		for i, x in ipairs(type(d[key]) == "table" and d[key] or {}) do
+			if i > SUMMARY_TOP then break end
+			local name = type(x) == "table" and type(x.n) == "string" and x.n:gsub("|", ""):sub(1, 48) or nil
+			if name and name ~= "" then
+				list[#list + 1] = { n = name, c = type(x.c) == "string" and x.c:match("^%u+$") and x.c:sub(1, 12) or nil,
+					k = num(x.k), d = num(x.d), v = num(x.v), t = num(x.t, 4102444800) }
+			end
+		end
+		out[key] = list
+	end
+	return out
+end
+
 -- Diagnóstico: las variantes del mensaje de honor de este cliente y los mensajes que no se
 -- reconocieron. Uso: /gmk dump LantuxGuild_Honor()
 function LantuxGuild_Honor()

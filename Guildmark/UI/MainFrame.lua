@@ -73,6 +73,18 @@ local function line(rows, text, indent, extra)
 	rows[#rows + 1] = row
 end
 local function space(rows) rows[#rows + 1] = { kind = "space" } end
+-- Fila con un selector de flechas: «texto      < opción >». options = { { key, label } },
+-- current = la clave elegida, set(key) al cambiar. Sin vuelta: en los extremos, la flecha se apaga.
+function ns.CyclerRow(rows, text, options, current, set, tooltip)
+	local index = 1
+	for i, o in ipairs(options) do if o.key == current then index = i end end
+	rows[#rows + 1] = { text = text, indent = 1, tall = true, cycler = {
+		label = options[index].label, tooltip = tooltip,
+		first = index == 1, last = index == #options,
+		onPrev = function() if index > 1 then set(options[index - 1].key); refresh() end end,
+		onNext = function() set(options[index < #options and index + 1 or 1].key); refresh() end,
+	} }
+end
 local function grey(text) return GREY .. text .. R end
 
 local function notInGuild()
@@ -1464,10 +1476,8 @@ function ns.BattleLogView(g, rows)
 	-- Últimas kills y muertes: verde cuando cazamos, rojo cuando nos matan, agrupadas por día.
 	-- El rival va en grande (con el emblema de su clase); zona y honor, al pasar el ratón.
 	header(rows, L["Últimas kills y muertes"])
-	local function filterButton(key, label)
-		return { label = label, selected = logFilter == key, onClick = function() logFilter = key; refresh() end }
-	end
-	line(rows, grey(L["Mostrar"]), 1, { buttons = { filterButton("all", L["Todo"]), filterButton("kill", L["Cazas"]), filterButton("death", L["Caídos"]) } })
+	ns.CyclerRow(rows, grey(L["Mostrar"]), { { key = "all", label = L["Todo"] }, { key = "kill", label = L["Cazas"] }, { key = "death", label = L["Caídos"] } },
+		logFilter, function(k) logFilter = k end)
 	local recent = {}
 	for _, k in ipairs(s.recent) do
 		if logFilter == "all" or k.kind == logFilter then recent[#recent + 1] = k end
@@ -2262,16 +2272,11 @@ function ns.HuntersView(g, rows)
 	-- Selectores con todas las opciones a la vista; la elegida, resaltada (selected).
 	local modeTip = { L["Golpes de gracia y participación"], L["Golpes de gracia: las bajas que remata cada uno, registradas por el addon (con víctima, rachas y venganzas)."],
 		L["Participación: las muertes con honor en el mundo según las estadísticas del juego. Cuentan a todos los que ayudan en la baja, también a sanadores y tanques. Sin campos de batalla."] }
-	local function modeButton(key, label)
-		return { label = label, selected = hunterMode == key, tooltip = modeTip, onClick = function() hunterMode = key; refresh() end }
-	end
-	local function periodButton(days, label)
-		return { label = label, selected = hunterDays == days, onClick = function() hunterDays = days; refresh() end }
-	end
-	line(rows, grey(L["Contar por"]), 1, { buttons = { modeButton("kb", L["Golpes de gracia"]), modeButton("world", L["Participación"]) } })
-	local periods = { periodButton(7, (L["%d días"]):format(7)), periodButton(30, (L["%d días"]):format(30)) }
-	if world then periods[3] = periodButton(0, L["Total"]) end -- el total solo existe en la estadística del juego
-	line(rows, grey(L["Periodo"]), 1, { buttons = periods })
+	ns.CyclerRow(rows, grey(L["Contar por"]), { { key = "kb", label = L["Golpes de gracia"] }, { key = "world", label = L["Participación"] } },
+		hunterMode, function(k) hunterMode = k end, modeTip)
+	local periods = { { key = 7, label = (L["%d días"]):format(7) }, { key = 30, label = (L["%d días"]):format(30) } }
+	if world then periods[3] = { key = 0, label = L["Total"] } end -- el total solo existe en la estadística del juego
+	ns.CyclerRow(rows, grey(L["Periodo"]), periods, hunterDays, function(k) hunterDays = k end)
 	if world then
 		local wb = worldBoard(g, hunterDays)
 		if #wb == 0 then line(rows, grey(L["Nadie todavía. Sale quien tenga la 1.2.0 o posterior."]), 1) end
@@ -2351,6 +2356,102 @@ function ns.HuntersView(g, rows)
 	end
 	space(rows)
 	line(rows, grey(L["Racha: bajas con honor seguidas sin caer ante otro jugador, fuera de los campos de batalla. Solo cuenta lo que registra el addon de cada uno."]), 1)
+end
+
+-- Facción > Cazadores: lo mismo, con los mejores de todas las hermandades de tu facción
+-- (cada una manda su resumen al anunciarse en la red, cada 10 minutos).
+local factionHunterMode, factionHunterDays = "kb", 7
+
+function ns.FactionHuntersView(rows)
+	local faction = UnitFactionGroup and UnitFactionGroup("player") or "Horde"
+	local guilds = {}
+	for _, e in ipairs(ns.FactionGuilds()) do
+		if e.faction == faction and type(e.hunters) == "table" then guilds[#guilds + 1] = e end
+	end
+	-- Junta la lista «key» de todas las hermandades, con la hermandad de cada uno.
+	local function merged(key, value)
+		local list = {}
+		for _, e in ipairs(guilds) do
+			for _, x in ipairs(e.hunters[key] or {}) do
+				list[#list + 1] = { n = x.n, c = x.c, k = x.k or 0, d = x.d or 0, v = x.v or 0, t = x.t, guild = e.guild, own = e.own }
+			end
+		end
+		table.sort(list, function(a, b)
+			if value(a) ~= value(b) then return value(a) > value(b) end
+			return a.n < b.n
+		end)
+		return list
+	end
+	local function guildText(x) return (x.own and GOLD or RED) .. "<" .. x.guild .. ">" .. R end
+	local function byV(x) return x.v end
+	local function byK(x) return x.k end
+
+	-- Rachas en curso de toda la facción.
+	local hot = merged("hot", byV)
+	header(rows, (L["En racha en la %s"]):format(ns.FactionName(faction)))
+	if #hot == 0 then line(rows, grey(L["Nadie lleva 3 bajas seguidas sin caer. ¡A por ellos!"]), 1) end
+	for i = 1, math.min(3, #hot) do
+		local h = hot[i]
+		rows[#rows + 1] = {
+			kind = "card", state = "normal", accent = PODIUM[i].color, icon = ICON_STREAK,
+			title = ("|cffff9a2e%d|r   %s"):format(h.v, ns.ClassColorName(h.n, h.c)),
+			desc = guildText(h) .. "  ·  " .. (L["%d bajas con honor seguidas sin caer"]):format(h.v),
+			status = GOLD .. streakTitle(h.v) .. R,
+			foot = h.t and grey((L["Desde el %s"]):format(date("%d/%m %H:%M", h.t))) or nil,
+		}
+	end
+
+	-- Clasificación: golpes de gracia o participación, por periodo.
+	space(rows)
+	local world = factionHunterMode == "world"
+	if not world and factionHunterDays == 0 then factionHunterDays = 7 end
+	header(rows, world and (factionHunterDays == 0 and L["Participación · total"] or (L["Participación · últimos %d días"]):format(factionHunterDays))
+		or (L["Cazadores · últimos %d días"]):format(factionHunterDays))
+	ns.CyclerRow(rows, grey(L["Contar por"]), { { key = "kb", label = L["Golpes de gracia"] }, { key = "world", label = L["Participación"] } },
+		factionHunterMode, function(k) factionHunterMode = k end)
+	local periods = { { key = 7, label = (L["%d días"]):format(7) }, { key = 30, label = (L["%d días"]):format(30) } }
+	if world then periods[3] = { key = 0, label = L["Total"] } end
+	ns.CyclerRow(rows, grey(L["Periodo"]), periods, factionHunterDays, function(k) factionHunterDays = k end)
+
+	local key = world and (factionHunterDays == 0 and "wt" or ("w" .. factionHunterDays)) or ("kb" .. factionHunterDays)
+	local board = merged(key, world and byV or byK)
+	if #board == 0 then line(rows, grey(L["Todavía no hay datos: salen las hermandades con la 1.2.0 o posterior."]), 1) end
+	for i = 1, math.min(15, #board) do
+		local e = board[i]
+		local value = world and (GREEN .. (L["%d con honor"]):format(e.v) .. R)
+			or (GREEN .. (e.k == 1 and L["1 kill"] or (L["%d kills"]):format(e.k)) .. R .. "  ·  " .. (L["%d muertes"]):format(e.d))
+		if PODIUM[i] then
+			rows[#rows + 1] = {
+				kind = "card", state = "normal", accent = PODIUM[i].color, icon = PODIUM[i].medal, iconBare = true,
+				title = PODIUM[i].text .. ("%d.º"):format(i) .. R .. "  " .. ns.ClassColorName(e.n, e.c),
+				desc = value,
+				foot = guildText(e),
+			}
+		else
+			rows[#rows + 1] = portraitFields(e.n, e.c, {
+				indent = 1, tall = true, iconOffset = 30,
+				cols = { { placeText(i), 30 }, { ns.ClassColorName(e.n, e.c), 180 }, { guildText(e), 190 }, { value, 200 } },
+			})
+		end
+	end
+
+	-- Récords de racha de la facción.
+	local rec = merged("rec", byV)
+	space(rows)
+	header(rows, L["Récords de racha"])
+	if #rec == 0 then line(rows, grey(L["Todavía no hay rachas."]), 1) end
+	for i = 1, math.min(5, #rec) do
+		local r = rec[i]
+		rows[#rows + 1] = portraitFields(r.n, r.c, {
+			indent = 1, tall = true, iconOffset = 30,
+			tint = i == 1 and { 1, 0.6, 0.1 } or nil, tintAlpha = 0.06,
+			cols = { { placeText(i), 30 }, { ns.ClassColorName(r.n, r.c), 170 }, { guildText(r), 180 },
+				{ ("|T%s:16|t  |cffff9a2e%s|r"):format(ICON_STREAK, (L["%d seguidas"]):format(r.v)), 120 },
+				{ r.t and grey(date("%d/%m", r.t)) or "", 50 } },
+		})
+	end
+	space(rows)
+	line(rows, grey(L["Cada hermandad manda sus 5 mejores de cada lista al anunciarse en la red (cada 10 minutos). Solo salen las que tienen la 1.2.0 o posterior."]), 1)
 end
 end
 
@@ -4337,6 +4438,52 @@ local function layoutRow(row, spec)
 		end
 	end
 	-- Límite derecho para el contenido (columnas, barras): nunca por debajo de los botones.
+	-- Selector con flechas (como el de la guía de mazmorras): < [opción] >, a la derecha.
+	--   spec.cycler = { label, onPrev, onNext, first, last, tooltip }
+	local cyc = spec.cycler
+	if cyc and not row.cycler then
+		local c = {}
+		c.label = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		c.label:SetSize(150, 22)
+		c.next = CreateFrame("Button", nil, row)
+		c.prev = CreateFrame("Button", nil, row)
+		for _, spec2 in ipairs({ { c.prev, "Prev" }, { c.next, "Next" } }) do
+			local arrow, dir = spec2[1], spec2[2]
+			arrow:SetSize(26, 26)
+			arrow:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. dir .. "Page-Up")
+			arrow:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. dir .. "Page-Down")
+			arrow:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. dir .. "Page-Disabled")
+			arrow:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+		end
+		c.next:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+		c.label:SetPoint("RIGHT", c.next, "LEFT", -1, 0)
+		c.prev:SetPoint("RIGHT", c.label, "LEFT", -1, 0)
+		row.cycler = c
+	end
+	if row.cycler then
+		local c = row.cycler
+		for _, part in ipairs({ c.label, c.prev, c.next }) do part:SetShown(cyc ~= nil) end
+		if cyc then
+			c.label:SetText(cyc.label or "")
+			local fs = c.label:GetFontString()
+			if fs then fs:SetTextColor(1, 0.82, 0.27) end
+			c.label:SetScript("OnClick", cyc.onNext) -- clic en el nombre: la siguiente
+			c.prev:SetScript("OnClick", cyc.onPrev)
+			c.next:SetScript("OnClick", cyc.onNext)
+			c.prev:SetEnabled(not cyc.first)
+			c.next:SetEnabled(not cyc.last)
+			local tip = cyc.tooltip
+			c.label:SetScript("OnEnter", tip and function(self)
+				GameTooltip:SetOwner(self, "ANCHOR_TOP")
+				for i, text in ipairs(tip) do
+					if i == 1 then GameTooltip:SetText(text) else GameTooltip:AddLine(text, 1, 1, 1, true) end
+				end
+				GameTooltip:Show()
+			end or nil)
+			c.label:SetScript("OnLeave", tip and function() GameTooltip:Hide() end or nil)
+			buttonsWidth = math.max(buttonsWidth, 210)
+		end
+	end
 	local contentRight = CONTENT_WIDTH - 4 - (buttonsWidth > 0 and (buttonsWidth + 8) or 0)
 	local rightAnchor = #buttons > 0 and row.buttons[math.min(#buttons, MAX_BUTTONS)] or nil
 
@@ -4487,19 +4634,10 @@ local function factionRanking(rows)
 		if m.key == factionMode then mode = m end
 	end
 	header(rows, (L["Clasificación de la %s · temporada %d"]):format(ns.FactionName(faction), season))
-	-- Categorías en dos filas de botones (la elegida, desactivada).
-	local function modeButton(m)
-		return { label = m.label, disabled = m.key == factionMode, tooltip = m.tip and { m.label, m.tip } or nil, onClick = function()
-			factionMode = m.key
-			refresh()
-		end }
-	end
-	local first, second = {}, {}
-	for i, m in ipairs(FACTION_MODES) do
-		table.insert(i <= 5 and first or second, modeButton(m))
-	end
-	line(rows, "", 0, { buttons = first })
-	line(rows, "", 0, { buttons = second })
+	-- Categoría con el selector de flechas.
+	local options = {}
+	for i, m in ipairs(FACTION_MODES) do options[i] = { key = m.key, label = m.label } end
+	ns.CyclerRow(rows, grey(L["Categoría"]), options, mode.key, function(k) factionMode = k end, mode.tip and { mode.label, mode.tip } or nil)
 	local list = {}
 	for _, e in ipairs(guilds) do
 		if e.faction == faction then list[#list + 1] = { e = e, v = mode.value(e.stats or {}, e) or 0 } end
@@ -4649,11 +4787,14 @@ views.faction = function()
 		{ key = "ranking", label = L["Clasificación"] },
 		{ key = "directory", label = L["Hermandades"] },
 		{ key = "records", label = L["Récords"] },
+		{ key = "hunters", label = L["Cazadores"] },
 		{ key = "versus", label = L["Horda contra Alianza"] },
 	})
 	if subview.faction == "directory" then
 		directoryView(g, rows)
 		rows.search = L["Buscar hermandad..."]
+	elseif subview.faction == "hunters" then
+		ns.FactionHuntersView(rows)
 	elseif subview.faction == "records" then
 		factionRecords(rows)
 	elseif subview.faction == "versus" then

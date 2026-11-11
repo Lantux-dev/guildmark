@@ -284,6 +284,7 @@ function ns.GuildAnnouncement()
 		draws = record.draws,
 		trophies = record.showcase,
 		stats = ns.GuildSeasonStats and ns.GuildSeasonStats() or nil, -- clasificación de la facción (Faction.lua)
+		hunters = ns.GuildHunterSummary and ns.GuildHunterSummary() or nil, -- Facción > Cazadores (Hunt.lua)
 	}
 end
 
@@ -340,6 +341,7 @@ ns.netHandlers.HI = function(sender, d)
 		rating = num(d.rating, 5000), wins = num(d.wins), losses = num(d.losses), draws = num(d.draws),
 		trophies = trophies, t = ns.Now(), by = sender,
 		stats = ns.SanitizeSeasonStats and ns.SanitizeSeasonStats(d.stats) or nil,
+		hunters = ns.SanitizeHunterSummary and ns.SanitizeHunterSummary(d.hunters) or nil,
 		-- De la red de pruebas: solo se ve en modo prueba (y caduca como las demás).
 		test = LG:InTestMode() or nil, live = LG:InTestMode() or nil,
 	}

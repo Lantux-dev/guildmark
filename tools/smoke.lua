@@ -1873,6 +1873,14 @@ do
 	add("kill", "Thorvi Martillo", 700); add("kill", "Thorvi Martillo", 650); add("death", "Thorvi Martillo", 600)
 	local st = ns.KillStreaks(g)
 	assert(st["Ana Sol"].current == 6 and st["Ana Sol"].best == 6, "racha en curso de 6 (la muerte la cortó en 4)")
+	-- Resumen para la facción: viaja en el anuncio de la red y llega limpio.
+	local sum = ns.GuildHunterSummary()
+	assert(sum.kb7[1].n == "Ana Sol" and sum.kb7[1].k == 11 and sum.hot[1].v == 6 and sum.rec[1].v == 6, "resumen de cazadores")
+	local dirty = { kb7 = { { n = "Malo|cff", c = "rogue<script>", k = "999999999", d = -3 } }, hot = "no", extra = { 1 } }
+	local clean = ns.SanitizeHunterSummary(dirty)
+	assert(clean.kb7[1].n == "Malocff" and clean.kb7[1].c == nil and clean.kb7[1].k == 100000 and clean.kb7[1].d == 0, "saneado")
+	assert(#clean.hot == 0 and clean.extra == nil, "solo las listas conocidas")
+	ns.SanitizeHunterSummary(ns.GuildHunterSummary()) -- lo propio también pasa el saneado
 	assert(st["Ana Sol"].reached[5], "llegó a 5")
 	assert(st["Thorvi Martillo"].current == 0 and st["Thorvi Martillo"].best == 2, "cayó: racha a cero, mejor 2")
 	local board = ns.HunterBoard(7)

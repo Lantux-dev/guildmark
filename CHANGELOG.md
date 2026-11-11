@@ -6,6 +6,7 @@
 - **New: PvP > Hunters.** Its own tab for the guild hunters: kill streaks happening right now, a podium (last 7 or 30 days) with kills, deaths, K/D, revenges, honor and favourite victim, the rest of the ranking, and streak records.
 - **Kill streaks:** honorable kills in a row without dying to another player (battlegrounds don't count). Three new guild achievements: Unstoppable (5), No Mercy (10) and Legend of the Frontier (20).
 - **Participation ranking (PvP > Hunters):** switch between killing blows and participation. Participation uses the game's world honorable kills statistic (no battlegrounds), which counts everyone who helps with a kill, so healers and tanks rank fairly. All-time totals straight away, plus the last 7 or 30 days (counted from when you install 1.2.0).
+- **New: Faction > Hunters.** The same for your whole faction: streaks happening right now, the top 15 by killing blows or participation (7 days, 30 days or all time) and the streak records, with each player's guild. Every guild shares its top 5 of each list on the guild network.
 - **New: PvP > Log.** The latest kills and deaths now have their own section (up to 60), with a filter for all, kills or deaths. Targets is lighter.
 - **Fixed: missing icons.** The Decorated, Hall of Heroes and Chest of Medals achievements, the Feats of Strength category, war league trophies and the guild level-up banner used trophy icons that don't exist in Forever; they now have their own.
 
@@ -15,6 +16,7 @@
 - **Nuevo: JcJ > Cazadores.** Pestaña propia para los cazadores de la hermandad: rachas en curso, podio (últimos 7 o 30 días) con bajas, muertes, K/D, venganzas, honor y víctima favorita, el resto de la clasificación y los récords de racha.
 - **Rachas de bajas:** bajas con honor seguidas sin caer ante otro jugador (los campos de batalla no cuentan). Tres logros de hermandad nuevos: Imparable (5), Sin piedad (10) y Leyenda de la frontera (20).
 - **Clasificación por participación (JcJ > Cazadores):** botón para cambiar entre golpes de gracia y participación. La participación usa la estadística del juego de muertes con honor en el mundo (sin campos de batalla), que cuenta a todos los que ayudan en la baja: sanadores y tanques salen como merecen. El total de siempre desde el primer momento, y los últimos 7 o 30 días (contando desde que instalas la 1.2.0).
+- **Nuevo: Facción > Cazadores.** Lo mismo para toda tu facción: rachas en curso, los 15 mejores por golpes de gracia o participación (7 días, 30 días o total) y los récords de racha, con la hermandad de cada uno. Cada hermandad comparte sus 5 mejores de cada lista en la red de hermandades.
 - **Nuevo: JcJ > Registro.** Las últimas kills y muertes tienen su propio apartado (hasta 60), con filtro de todo, cazas o caídos. Objetivos queda más ligero.
 - **Arreglado: iconos que no se veían.** Los logros Condecorados, Galería de héroes y Pecho de medallas, la categoría Proezas de fuerza, los trofeos de liga de las guerras y el cartel de subida de nivel usaban iconos de trofeo que no existen en Forever; ahora tienen los suyos.
 
