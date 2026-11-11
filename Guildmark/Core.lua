@@ -6,6 +6,8 @@ ns.LG = LG
 
 -- Imágenes propias del addon (TGA de 32 bits con transparencia, medidas en potencia de 2).
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\"
+-- Iconos propios (Media/Icons, 128 px con fondo): los trofeos del juego no existen en Forever.
+ns.ICONS = ns.MEDIA .. "Icons\\"
 
 local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 -- Datos de un objeto: en los clientes modernos (Forever) la función global ya no existe, va en C_Item.
@@ -38,6 +40,7 @@ local defaults = {
 		recipes = {},     -- [professionID] = { name, ids = { recetas aprendidas } }
 		wager = {},       -- botín de guerra: { periods = { { desde, hasta } } } (Bounty.lua)
 		profile = {},     -- ficha de rol: título, papel, lema, historia e insignias del retrato (Profile.lua)
+		worldHK = {},    -- [día] = muertes con honor en el mundo al empezar ese día (PvP.lua)
 		hkBase = {},      -- [hermandad] = { t, hk }: contador de honor cuando el addon empezó a contar
 		stats = {         -- recolección y fabricación (Modules/Gathering.lua)
 			gathered = { mining = 0, herb = 0, skinning = 0 },
@@ -887,6 +890,27 @@ function LantuxGuild_FrameArt(frameName, maxItems)
 	end
 	walk(root, 0)
 	return #out .. " texturas: " .. table.concat(out, ", ")
+end
+
+-- Estadísticas de JcJ del juego (muertes con honor y golpes de gracia, en el mundo y en
+-- campos de batalla): su id, nombre y valor. Uso: /gmk dump LantuxGuild_PvPStats()
+function LantuxGuild_PvPStats()
+	if not GetStatistic or not GetStatisticsCategoryList then return "sin API de estadísticas" end
+	local parts = {}
+	for _, cat in ipairs(GetStatisticsCategoryList() or {}) do
+		local okC, catName = pcall(GetCategoryInfo, cat)
+		local n = GetCategoryNumAchievements and GetCategoryNumAchievements(cat) or 0
+		for i = 1, n do
+			local ok, id, name = pcall(GetAchievementInfo, cat, i)
+			local low = ok and type(name) == "string" and name:lower() or ""
+			if low:find("honor") or low:find("gracia") or low:find("killing") then
+				local okV, value = pcall(GetStatistic, id)
+				parts[#parts + 1] = ("[%s %s] %s=%s: %s"):format(tostring(cat), okC and tostring(catName) or "?", tostring(id),
+					tostring(name), okV and tostring(value) or "?")
+			end
+		end
+	end
+	return #parts .. " estadísticas: " .. table.concat(parts, " || ")
 end
 
 -- Categorías de logros del juego (para ver si los desafíos de legado son logros por debajo).

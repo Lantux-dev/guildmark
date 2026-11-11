@@ -12,6 +12,8 @@
 --   CLAIM   "yo respondo a ese HELLO", para que no respondan todos
 --   SYNC    respuesta a un HELLO, por susurro (con resumen por informante y día)
 --   FILL    lo que a quien respondió le faltaba según ese resumen, por susurro
+--   KSUM    cuántas kills y muertes propias tengo de hoy y ayer (repaso entre conectados)
+--   KREQ    "de las tuyas me faltan estos días", por susurro (se responde con FILL)
 --   FUNDS   la colecta del banco, del tesorero a quien entra sin ella (Modules/BankFund.lua)
 --   FORGET  un miembro pide que se borren sus datos
 -- Los de cada módulo (ORDER, EVENT, SIGNUP, ATTEND, ADJUST, TARGET, AUCTION,
@@ -472,6 +474,98 @@ ns.handlers.FILL = withGuild(function(g, sender, data, distribution)
 	LG:Debug("fill de", sender, "aplicado")
 	return changed
 end)
+
+---------------------------------------------------------------------------
+-- Repaso de kills entre conectados (1.1.5)
+--
+-- Al entrar, un miembro te pasa lo que te falta; pero si mientras estáis conectados se
+-- pierde el aviso de una kill (el juego descarta mensajes con mucho tráfico), nadie lo
+-- repara hasta volver a entrar. Por eso cada uno anuncia de vez en cuando cuántas kills y
+-- muertes suyas tiene de hoy y de ayer (KSUM, muy pequeño). Quien tenga menos de esa persona
+-- se las pide por susurro (KREQ) y ella se las devuelve por FILL. Solo el autor responde
+-- por las suyas: es quien las tiene seguro.
+---------------------------------------------------------------------------
+
+local KSUM_DAYS = 2           -- hoy y ayer
+local KSUM_EVERY = 15 * 60    -- repaso periódico si hay kills recientes
+local KSUM_AFTER_KILL = 45    -- y poco después de cada kill propia (agrupadas)
+local KREQ_EVERY = 60         -- a cada uno se le responde como mucho una vez por minuto
+local KREQ_MAX = 300
+local kreqAnswered = {}       -- [quien pide] = GetTime()
+
+local function today() return math.floor(ns.Now() / 86400) end
+
+-- { [día] = cuántas } de las kills y muertes de who en los últimos KSUM_DAYS.
+local function killDays(g, who)
+	local days, total, from = {}, 0, today() - KSUM_DAYS + 1
+	for _, k in pairs(g.kills) do
+		if k.reporter == who then
+			local day = math.floor((k.t or 0) / 86400)
+			if day >= from then
+				days[day] = (days[day] or 0) + 1
+				total = total + 1
+			end
+		end
+	end
+	return days, total
+end
+ns.KillDays = killDays
+
+function ns.SendKillSummary()
+	local g = LG:GuildData()
+	if not g or not LG:HasConsent() then return end
+	local days, total = killDays(g, ns.PlayerFullName())
+	if total > 0 then LG:Send("KSUM", { days = days }, "GUILD", nil, "BULK") end
+end
+
+local ksumTimer
+function ns.ScheduleKillSummary(delay)
+	if ksumTimer then return end
+	ksumTimer = LG:ScheduleTimer(function()
+		ksumTimer = nil
+		ns.SendKillSummary()
+	end, delay or KSUM_AFTER_KILL)
+end
+
+function ns.StartKillSummaries()
+	if LG.ksumRepeating then return end
+	LG.ksumRepeating = LG:ScheduleRepeatingTimer(function() ns.SendKillSummary() end, KSUM_EVERY)
+end
+
+ns.handlers.KSUM = function(sender, data, _, rawSender)
+	local g = LG:GuildData()
+	if not g or type(data) ~= "table" or type(data.days) ~= "table" or sender == ns.PlayerFullName() then return end
+	local mine = killDays(g, sender)
+	local from, to = today() - KSUM_DAYS + 1, today()
+	local want = {}
+	for day, n in pairs(data.days) do
+		day, n = tonumber(day), tonumber(n)
+		if day and n and day >= from and day <= to and (mine[day] or 0) < n then want[#want + 1] = day end
+	end
+	if #want == 0 then return end
+	LG:ScheduleTimer(function()
+		LG:Send("KREQ", { days = want }, "WHISPER", rawSender or sender, "BULK")
+	end, 1 + math.random() * 4)
+end
+
+ns.handlers.KREQ = function(sender, data, distribution, rawSender)
+	local g = LG:GuildData()
+	if not g or distribution ~= "WHISPER" or type(data) ~= "table" or type(data.days) ~= "table" then return end
+	if GetTime() - (kreqAnswered[sender] or -math.huge) < KREQ_EVERY then return end
+	local wanted = {}
+	for _, day in ipairs(data.days) do
+		if tonumber(day) then wanted[tonumber(day)] = true end
+	end
+	local me, list = ns.PlayerFullName(), {}
+	for _, k in pairs(g.kills) do
+		if k.reporter == me and wanted[math.floor((k.t or 0) / 86400)] then list[#list + 1] = k end
+	end
+	if #list == 0 then return end
+	table.sort(list, function(a, b) return a.t > b.t end)
+	for i = #list, KREQ_MAX + 1, -1 do list[i] = nil end
+	kreqAnswered[sender] = GetTime()
+	LG:SendParts("FILL", { kills = list, runs = {} }, "WHISPER", rawSender or sender, "BULK")
+end
 
 ---------------------------------------------------------------------------
 -- Sincronización al entrar

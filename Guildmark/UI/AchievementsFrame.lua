@@ -745,6 +745,6 @@ function ns.ShowGuildLevelToast(level)
 	for _, r in ipairs(ns.ACH_REWARDS) do
 		if ns.GuildLevel(r.points) == level then reward = r end
 	end
-	queueToast({ icon = reward and reward.icon or "Interface\\Icons\\INV_Misc_Trophy_03", gold = perks.goldToast and true or false,
+	queueToast({ icon = reward and reward.icon or ns.ICONS .. "trophy_gold", gold = perks.goldToast and true or false,
 		title = L["Nivel de hermandad"], text = (L["¡Nivel %d!"]):format(level), sub = reward and reward.label or nil })
 end

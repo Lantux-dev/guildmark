@@ -1454,38 +1454,28 @@ local function targetsView(g, rows)
 			buttons = (canManage and not loose) and { { label = L["Objetivo"], onClick = function() ns.ToggleTarget(e.key) end } } or nil,
 		}
 	end
+end
 
-	-- Cazadores de la semana: puesto, retrato, kills y venganzas.
-	local since = ns.Now() - 7 * 86400
-	local revenges = {}
-	for _, k in ipairs(s.recent) do
-		if k.kind == "kill" and k.revenge and k.t >= since then revenges[k.killerName] = (revenges[k.killerName] or 0) + 1 end
-	end
-	space(rows)
-	header(rows, L["Cazadores de la semana"])
-	local hunters = sortedCounts(s.hunters, 5)
-	if #hunters == 0 then line(rows, grey(L["Nadie todavía."]), 1) end
-	for i, e in ipairs(hunters) do
-		local m = g.members[e.key]
-		local medal = i == 1 and GOLD or (i <= 3 and "|cffc0c0c0" or GREY)
-		rows[#rows + 1] = portraitFields(e.key, m and m.class, {
-			indent = 1,
-			tall = true,
-			iconOffset = 30,
-			cols = { { medal .. ("%d."):format(i) .. R, 30 }, { ns.ClassColorName(e.key, m and m.class), 200 },
-				{ GREEN .. (e.n == 1 and L["1 kill"] or (L["%d kills"]):format(e.n)) .. R, 90 },
-				{ revenges[e.key] and (GOLD .. (revenges[e.key] == 1 and L["1 venganza"] or (L["%d venganzas"]):format(revenges[e.key])) .. R) or "", 110 } },
-		})
-	end
-
+-- JcJ > Registro: últimas kills y muertes de la hermandad (sin campos de batalla).
+do
+local logFilter = "all" -- "all" | "kill" | "death"
+function ns.BattleLogView(g, rows)
+	local s = ns.HuntStats(7)
 	-- Últimas kills y muertes: verde cuando cazamos, rojo cuando nos matan, agrupadas por día.
 	-- El rival va en grande (con el emblema de su clase); zona y honor, al pasar el ratón.
-	space(rows)
 	header(rows, L["Últimas kills y muertes"])
-	if #s.recent == 0 then line(rows, grey(L["Todavía no hay registros."]), 1) end
+	local function filterButton(key, label)
+		return { label = label, selected = logFilter == key, onClick = function() logFilter = key; refresh() end }
+	end
+	line(rows, grey(L["Mostrar"]), 1, { buttons = { filterButton("all", L["Todo"]), filterButton("kill", L["Cazas"]), filterButton("death", L["Caídos"]) } })
+	local recent = {}
+	for _, k in ipairs(s.recent) do
+		if logFilter == "all" or k.kind == logFilter then recent[#recent + 1] = k end
+	end
+	if #recent == 0 then line(rows, grey(L["Todavía no hay registros."]), 1) end
 	local lastDay
-	for i = 1, math.min(25, #s.recent) do
-		local k = s.recent[i]
+	for i = 1, math.min(60, #recent) do
+		local k = recent[i]
 		local day = dayLabel(k.t)
 		if day ~= lastDay then
 			lastDay = day
@@ -1523,6 +1513,7 @@ local function targetsView(g, rows)
 		end
 		rows[#rows + 1] = fields
 	end
+end
 end
 
 ---------------------------------------------------------------------------
@@ -2181,6 +2172,188 @@ function bountyUI.view(g, rows)
 	end
 end
 
+---------------------------------------------------------------------------
+-- JcJ > Cazadores: podio, rachas en curso, clasificación y récords de racha
+---------------------------------------------------------------------------
+
+do
+local hunterDays = 7 -- periodo de la clasificación: 7 o 30 días
+local hunterMode = "kb" -- "kb": golpes de gracia (lo que registra el addon) · "world": participación (estadística del juego)
+
+-- Participación: muertes con honor en el mundo de cada miembro según el juego (ficha, pvp.world).
+-- Cuenta también a quien ayuda sin rematar (sanadores, tanques). Solo los que tienen la 1.2.0+.
+-- days = 7, 30 o 0 (total de siempre: la estadística tal cual, disponible desde el primer día).
+local function worldBoard(g, days)
+	local list = {}
+	for name, m in pairs(g.members) do
+		local w = type(m.pvp) == "table" and type(m.pvp.world) == "table" and m.pvp.world or nil
+		local n = w and tonumber(days == 0 and w.total or (days == 7 and w.d7 or w.d30)) or nil
+		if n and n > 0 then
+			list[#list + 1] = { name = name, class = m.class, n = math.floor(n), total = tonumber(w.total) or 0,
+				partial = days > 0 and type(w.since) == "number" and (ns.Now() - w.since) < (days - 1) * 86400 or false, since = w.since }
+		end
+	end
+	table.sort(list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.name < b.name end)
+	return list
+end
+ns.WorldBoard = worldBoard
+local PODIUM = {
+	{ color = { 1, 0.82, 0 }, text = "|cffffd100", medal = ns.MEDIA .. "Medals\\hunter_3" },
+	{ color = { 0.78, 0.8, 0.86 }, text = "|cffc8ccd8", medal = ns.MEDIA .. "Medals\\hunter_2" },
+	{ color = { 0.8, 0.5, 0.25 }, text = "|cffcd8040", medal = ns.MEDIA .. "Medals\\hunter_1" },
+}
+-- Puesto: medalla de cazador (oro, plata, bronce) para los tres primeros; número para el resto.
+local function placeText(i)
+	local p = PODIUM[i]
+	if p then return ("|T%s:22:22|t"):format(p.medal) end -- cabe en la columna del puesto (30)
+	return GREY .. ("%d."):format(i) .. R
+end
+local ICON_STREAK = "Interface\\Icons\\Spell_Fire_FlameBolt"
+
+-- Nombre de la racha según su tamaño (los mismos números que los logros).
+local function streakTitle(n)
+	if n >= 20 then return L["¡Leyenda de la frontera!"] end
+	if n >= 10 then return L["¡Sin piedad!"] end
+	if n >= 5 then return L["¡Imparable!"] end
+	return L["En racha"]
+end
+ns.StreakTitle = streakTitle
+
+
+local function kd(e)
+	if e.deaths == 0 then return e.kills > 0 and tostring(e.kills) or "–" end
+	return ("%.1f"):format(e.kills / e.deaths)
+end
+
+function ns.HuntersView(g, rows)
+	local board, streaks = ns.HunterBoard(hunterDays)
+	local function classOf(name) local m = g.members[name] return m and m.class end
+
+	-- Rachas en curso: los que llevan 3 o más bajas seguidas sin caer.
+	local hot = {}
+	for name, st in pairs(streaks) do
+		if st.current >= 3 then hot[#hot + 1] = { name = name, n = st.current, since = st.since, best = st.best } end
+	end
+	table.sort(hot, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.name < b.name end)
+	header(rows, L["En racha ahora"])
+	if #hot == 0 then line(rows, grey(L["Nadie lleva 3 bajas seguidas sin caer. ¡A por ellos!"]), 1) end
+	for i = 1, math.min(3, #hot) do
+		local h = hot[i]
+		rows[#rows + 1] = {
+			kind = "card", state = "normal", accent = PODIUM[i].color, -- oro, plata y bronce, como el podio
+			icon = ICON_STREAK, -- la llama: cuadrada, encaja en el marco de la tarjeta
+			-- El número de la racha delante del nombre (el nombre, en el color de su clase).
+			title = ("|cffff9a2e%d|r   %s"):format(h.n, ns.ClassColorName(h.name, classOf(h.name))),
+			desc = (L["%d bajas con honor seguidas sin caer"]):format(h.n),
+			status = GOLD .. streakTitle(h.n) .. R,
+			foot = grey((L["Desde el %s"]):format(date("%d/%m %H:%M", h.since or ns.Now()))
+				.. (h.best > h.n and ("  ·  " .. (L["su mejor racha: %d"]):format(h.best)) or ("  ·  " .. L["¡su mejor racha!"]))),
+		}
+	end
+
+	-- Podio del periodo.
+	space(rows)
+	local world = hunterMode == "world"
+	-- Periodos: 7 y 30 días; en participación, también el total de siempre (0).
+	if not world and hunterDays == 0 then hunterDays = 7 end
+	local title = world and (hunterDays == 0 and L["Participación · total"] or (L["Participación · últimos %d días"]):format(hunterDays))
+		or (L["Cazadores · últimos %d días"]):format(hunterDays)
+	header(rows, title)
+	-- Selectores con todas las opciones a la vista; la elegida, resaltada (selected).
+	local modeTip = { L["Golpes de gracia y participación"], L["Golpes de gracia: las bajas que remata cada uno, registradas por el addon (con víctima, rachas y venganzas)."],
+		L["Participación: las muertes con honor en el mundo según las estadísticas del juego. Cuentan a todos los que ayudan en la baja, también a sanadores y tanques. Sin campos de batalla."] }
+	local function modeButton(key, label)
+		return { label = label, selected = hunterMode == key, tooltip = modeTip, onClick = function() hunterMode = key; refresh() end }
+	end
+	local function periodButton(days, label)
+		return { label = label, selected = hunterDays == days, onClick = function() hunterDays = days; refresh() end }
+	end
+	line(rows, grey(L["Contar por"]), 1, { buttons = { modeButton("kb", L["Golpes de gracia"]), modeButton("world", L["Participación"]) } })
+	local periods = { periodButton(7, (L["%d días"]):format(7)), periodButton(30, (L["%d días"]):format(30)) }
+	if world then periods[3] = periodButton(0, L["Total"]) end -- el total solo existe en la estadística del juego
+	line(rows, grey(L["Periodo"]), 1, { buttons = periods })
+	if world then
+		local wb = worldBoard(g, hunterDays)
+		if #wb == 0 then line(rows, grey(L["Nadie todavía. Sale quien tenga la 1.2.0 o posterior."]), 1) end
+		for i = 1, math.min(15, #wb) do
+			local e = wb[i]
+			local partial = e.partial and e.since and grey("  " .. (L["(desde el %s)"]):format(date("%d/%m", e.since))) or ""
+			if PODIUM[i] then
+				local p = PODIUM[i]
+				rows[#rows + 1] = {
+					kind = "card", state = "normal", accent = p.color, icon = p.medal, iconBare = true,
+					title = p.text .. ("%d.º"):format(i) .. R .. "  " .. ns.ClassColorName(e.name, e.class),
+					desc = GREEN .. (L["%d muertes con honor en el mundo"]):format(e.n) .. R .. partial,
+					foot = hunterDays > 0 and grey((L["En total: %d en el mundo"]):format(e.total)) or nil,
+				}
+			else
+				rows[#rows + 1] = portraitFields(e.name, e.class, {
+					indent = 1, tall = true, iconOffset = 30,
+					cols = { { placeText(i), 30 }, { ns.ClassColorName(e.name, e.class), 190 },
+						{ GREEN .. (L["%d con honor"]):format(e.n) .. R, 120 }, { partial, 140 },
+						{ hunterDays > 0 and grey((L["en total: %d"]):format(e.total)) or "", 120 } },
+				})
+			end
+		end
+	end
+	if not world and #board == 0 then line(rows, grey(L["Nadie todavía."]), 1) end
+	for i = 1, world and 0 or math.min(3, #board) do
+		local e, p = board[i], PODIUM[i]
+		local foot = {}
+		if e.victim then
+			foot[#foot + 1] = (L["Víctima favorita: %s (%d)"]):format(ns.ShortName(e.victim) or "?", e.victimN)
+				.. (e.victimGuild and (" <" .. e.victimGuild .. ">") or "")
+		end
+		if e.best > 0 then foot[#foot + 1] = (L["mejor racha: %d"]):format(e.best) end
+		rows[#rows + 1] = {
+			kind = "card", state = "normal", accent = p.color,
+			icon = p.medal, iconBare = true, -- la medalla trae su propio marco
+			title = p.text .. ("%d.º"):format(i) .. R .. "  " .. ns.ClassColorName(e.name, classOf(e.name)),
+			desc = GREEN .. (e.kills == 1 and L["1 kill"] or (L["%d kills"]):format(e.kills)) .. R
+				.. "  ·  " .. (L["%d muertes"]):format(e.deaths) .. "  ·  " .. (L["K/D %s"]):format(kd(e))
+				.. (e.revenges > 0 and ("  ·  " .. GOLD .. (e.revenges == 1 and L["1 venganza"] or (L["%d venganzas"]):format(e.revenges)) .. R) or ""),
+			status = e.honor > 0 and (GOLD .. (L["Honor: +%d"]):format(e.honor) .. R) or nil,
+			foot = grey(table.concat(foot, "  ·  ")),
+		}
+	end
+	-- El resto de la clasificación, en filas.
+	for i = 4, world and 0 or math.min(15, #board) do
+		local e = board[i]
+		rows[#rows + 1] = portraitFields(e.name, classOf(e.name), {
+			indent = 1, tall = true, iconOffset = 30,
+			cols = { { GREY .. ("%d."):format(i) .. R, 30 }, { ns.ClassColorName(e.name, classOf(e.name)), 190 },
+				{ GREEN .. (e.kills == 1 and L["1 kill"] or (L["%d kills"]):format(e.kills)) .. R, 80 },
+				{ grey((L["K/D %s"]):format(kd(e))), 70 },
+				{ e.revenges > 0 and (GOLD .. (e.revenges == 1 and L["1 venganza"] or (L["%d venganzas"]):format(e.revenges)) .. R) or "", 100 },
+				{ e.best > 0 and grey((L["mejor racha: %d"]):format(e.best)) or "", 110 } },
+		})
+	end
+
+	-- Récords de racha (con lo que guarda el addon: los últimos 60 días).
+	local records = {}
+	for name, st in pairs(streaks) do
+		if st.best >= 2 then records[#records + 1] = { name = name, n = st.best, t = st.bestAt } end
+	end
+	table.sort(records, function(a, b) if a.n ~= b.n then return a.n > b.n end return (a.t or 0) < (b.t or 0) end)
+	space(rows)
+	header(rows, L["Récords de racha"])
+	if #records == 0 then line(rows, grey(L["Todavía no hay rachas."]), 1) end
+	for i = 1, math.min(5, #records) do
+		local r = records[i]
+		rows[#rows + 1] = portraitFields(r.name, classOf(r.name), {
+			indent = 1, tall = true, iconOffset = 30,
+			tint = i == 1 and { 1, 0.6, 0.1 } or nil, tintAlpha = 0.06,
+			cols = { { placeText(i), 30 }, { ns.ClassColorName(r.name, classOf(r.name)), 190 },
+				{ ("|T%s:16|t  |cffff9a2e%s|r"):format(ICON_STREAK, (L["%d seguidas"]):format(r.n)), 130 },
+				{ GOLD .. streakTitle(r.n) .. R, 150 },
+				{ r.t and grey(date("%d/%m", r.t)) or "", 60 } },
+		})
+	end
+	space(rows)
+	line(rows, grey(L["Racha: bajas con honor seguidas sin caer ante otro jugador, fuera de los campos de batalla. Solo cuenta lo que registra el addon de cada uno."]), 1)
+end
+end
+
 views.hunt = function()
 	local g = LG:GuildData()
 	if not g then return notInGuild() end
@@ -2196,7 +2369,7 @@ views.hunt = function()
 		if c.kind == "assault" then assaults = assaults + 1 else calls = calls + 1 end
 	end
 	local function label(text, n) return n > 0 and (text .. " (" .. n .. ")") or text end
-	local list = { { key = "targets", label = L["Objetivos"] }, { key = "bounty", label = label(L["Cabezas con precio"], #ns.BountyTargets()) } }
+	local list = { { key = "targets", label = L["Objetivos"] }, { key = "hunters", label = L["Cazadores"] }, { key = "log", label = L["Registro"] }, { key = "bounty", label = label(L["Cabezas con precio"], #ns.BountyTargets()) } }
 	if ns.WARS_PAUSED then
 		list[#list + 1] = { key = "aid", label = label(L["Auxilio"], calls) }
 		list[#list + 1] = { key = "assault", label = label(L["Asaltos"], assaults) }
@@ -2211,6 +2384,10 @@ views.hunt = function()
 		assaultView(g, rows)
 	elseif subview.hunt == "bounty" then
 		bountyUI.view(g, rows)
+	elseif subview.hunt == "log" then
+		ns.BattleLogView(g, rows)
+	elseif subview.hunt == "hunters" then
+		ns.HuntersView(g, rows)
 	elseif subview.hunt == "wars" then
 		warsView(g, rows)
 	elseif subview.hunt == "directory" and not ns.WARS_PAUSED then
@@ -4150,6 +4327,12 @@ local function layoutRow(row, spec)
 			end or nil)
 			btn:SetScript("OnLeave", tip and function() GameTooltip:Hide() end or nil)
 			btn:SetEnabled(not def.disabled)
+			-- Opción elegida de un selector: resaltada y en blanco; las demás, como siempre.
+			if def.selected then btn:LockHighlight() else btn:UnlockHighlight() end
+			local fs = btn:GetFontString()
+			if fs and not def.disabled then
+				if def.selected then fs:SetTextColor(1, 1, 1) else fs:SetTextColor(1, 0.82, 0) end
+			end
 			buttonsWidth = buttonsWidth + width + 3
 		end
 	end

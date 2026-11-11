@@ -1,5 +1,23 @@
 # Cambios · Changelog
 
+## 1.2.0 · 2026-11
+
+- **PvP kills stay in sync between online members:** if the live message about a kill got lost (the game drops messages when there is a lot of traffic), members who were online never got it until they logged in again. Now each player regularly sends a tiny summary of how many of their own kills and deaths they have from today and yesterday, and anyone missing some asks them for the rest.
+- **New: PvP > Hunters.** Its own tab for the guild hunters: kill streaks happening right now, a podium (last 7 or 30 days) with kills, deaths, K/D, revenges, honor and favourite victim, the rest of the ranking, and streak records.
+- **Kill streaks:** honorable kills in a row without dying to another player (battlegrounds don't count). Three new guild achievements: Unstoppable (5), No Mercy (10) and Legend of the Frontier (20).
+- **Participation ranking (PvP > Hunters):** switch between killing blows and participation. Participation uses the game's world honorable kills statistic (no battlegrounds), which counts everyone who helps with a kill, so healers and tanks rank fairly. All-time totals straight away, plus the last 7 or 30 days (counted from when you install 1.2.0).
+- **New: PvP > Log.** The latest kills and deaths now have their own section (up to 60), with a filter for all, kills or deaths. Targets is lighter.
+- **Fixed: missing icons.** The Decorated, Hall of Heroes and Chest of Medals achievements, the Feats of Strength category, war league trophies and the guild level-up banner used trophy icons that don't exist in Forever; they now have their own.
+
+---
+
+- **Las muertes de JcJ se mantienen iguales entre los conectados:** si se perdía el aviso en directo de una muerte (el juego descarta mensajes cuando hay mucho tráfico), los que estaban conectados no la recibían hasta volver a entrar. Ahora cada jugador manda de vez en cuando un resumen pequeñito de cuántas bajas y muertes suyas tiene de hoy y de ayer, y a quien le falte alguna se la pide.
+- **Nuevo: JcJ > Cazadores.** Pestaña propia para los cazadores de la hermandad: rachas en curso, podio (últimos 7 o 30 días) con bajas, muertes, K/D, venganzas, honor y víctima favorita, el resto de la clasificación y los récords de racha.
+- **Rachas de bajas:** bajas con honor seguidas sin caer ante otro jugador (los campos de batalla no cuentan). Tres logros de hermandad nuevos: Imparable (5), Sin piedad (10) y Leyenda de la frontera (20).
+- **Clasificación por participación (JcJ > Cazadores):** botón para cambiar entre golpes de gracia y participación. La participación usa la estadística del juego de muertes con honor en el mundo (sin campos de batalla), que cuenta a todos los que ayudan en la baja: sanadores y tanques salen como merecen. El total de siempre desde el primer momento, y los últimos 7 o 30 días (contando desde que instalas la 1.2.0).
+- **Nuevo: JcJ > Registro.** Las últimas kills y muertes tienen su propio apartado (hasta 60), con filtro de todo, cazas o caídos. Objetivos queda más ligero.
+- **Arreglado: iconos que no se veían.** Los logros Condecorados, Galería de héroes y Pecho de medallas, la categoría Proezas de fuerza, los trofeos de liga de las guerras y el cartel de subida de nivel usaban iconos de trofeo que no existen en Forever; ahora tienen los suyos.
+
 ## 1.1.5 · 2026-11
 
 - **Fixed: guild achievement banner only showed for one member.** It appeared only on the addon that noticed the achievement first; everyone else just received it silently. Now every online member sees the banner (only for achievements earned in the last 10 minutes).

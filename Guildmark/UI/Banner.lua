@@ -61,7 +61,7 @@ local function resolveHonor(key)
 	if season then
 		local league = ns.WAR_LEAGUES[tonumber(tier)]
 		if not league then return nil end
-		return { icon = tonumber(tier) >= 3 and "Interface\\Icons\\INV_Misc_Trophy_03" or "Interface\\Icons\\INV_Misc_Trophy_02",
+		return { icon = tonumber(tier) >= 3 and ns.ICONS .. "trophy_gold" or ns.ICONS .. "trophy_silver",
 			color = league.color, title = (L["Liga de %s en la temporada %d"]):format(league.label, tonumber(season)), sub = L["Proezas de fuerza"] }
 	end
 	season = key:match("^feat:unbeaten:(%d+)$")

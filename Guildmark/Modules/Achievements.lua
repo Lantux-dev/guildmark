@@ -39,7 +39,7 @@ ns.ACH_CATEGORIES = {
 	{ key = "professions", label = L["Profesiones"], icon = "Interface\\Icons\\Trade_BlackSmithing" },
 	{ key = "community", label = L["Comunidad"], icon = "Interface\\Icons\\Spell_Holy_PrayerOfHealing02" },
 	-- Proezas de fuerza: lo logrado en temporadas pasadas; permanentes y sin puntos.
-	{ key = "feats", label = L["Proezas de fuerza"], icon = "Interface\\Icons\\INV_Misc_Trophy_03", feats = true },
+	{ key = "feats", label = L["Proezas de fuerza"], icon = ns.ICONS .. "trophy_gold", feats = true },
 }
 
 -- Nivel de hermandad: uno cada 10 puntos (del 1 al 10). Cada nivel desbloquea una
@@ -147,6 +147,14 @@ local function gatherFacts(g)
 		sortedTimes(f[key])
 	end
 	for guild, list in pairs(f.nemesis) do sortedTimes(list) end
+	-- Rachas: la mejor de cualquier miembro y cuándo llegó alguien por primera vez a cada número.
+	f.bestStreak, f.streakAt = 0, {}
+	for _, st in pairs(ns.KillStreaks and ns.KillStreaks(g) or {}) do
+		if st.best > f.bestStreak then f.bestStreak = st.best end
+		for n, t in pairs(st.reached) do
+			if not f.streakAt[n] or t < f.streakAt[n] then f.streakAt[n] = t end
+		end
+	end
 
 	-- Instantáneas: miembros con el addon, honor sumado, profesiones, clases por nivel.
 	f.addonMembers, f.hkSum, f.skillSum = 0, 0, 0
@@ -363,6 +371,13 @@ local function classes(minLevel)
 	end
 end
 
+-- Racha de bajas sin caer (Hunt.lua): basta con que un miembro llegue.
+local function streak(target)
+	return function(f)
+		return math.min(f.bestStreak or 0, target), target, f.streakAt and f.streakAt[target]
+	end
+end
+
 local function snapshot(key, target)
 	return function(f)
 		return math.min(f[key], target), target, nil
@@ -473,6 +488,12 @@ local ACH = {
 		desc = L["Venga a un compañero 5 veces."], eval = counter("revenges", 5) },
 	{ id = "revenge2", cat = "pvp", name = L["Nadie se queda atrás"], icon = "Interface\\Icons\\Ability_Warrior_Revenge",
 		desc = L["Venga a un compañero 25 veces."], eval = counter("revenges", 25) },
+	{ id = "streak1", cat = "pvp", name = L["Imparable"], icon = "Interface\\Icons\\Ability_Warrior_BattleShout",
+		desc = L["Un miembro encadena 5 bajas con honor sin caer ante otro jugador."], eval = streak(5) },
+	{ id = "streak2", cat = "pvp", name = L["Sin piedad"], icon = "Interface\\Icons\\Ability_CriticalStrike",
+		desc = L["Un miembro encadena 10 bajas con honor sin caer ante otro jugador."], eval = streak(10) },
+	{ id = "streak3", cat = "pvp", name = L["Leyenda de la frontera"], icon = "Interface\\Icons\\Spell_Holy_SealOfMight",
+		desc = L["Un miembro encadena 20 bajas con honor sin caer ante otro jugador."], eval = streak(20) },
 	{ id = "nemesis", cat = "pvp", name = L["Némesis"], icon = "Interface\\Icons\\INV_Misc_Bone_HumanSkull_01",
 		desc = L["Mata 50 veces a miembros de una misma hermandad."], eval = function(f)
 			local best, bestAt = 0, nil
@@ -568,11 +589,11 @@ local ACH = {
 			return math.min(f.bestCollection, f.cosmetics), f.cosmetics, nil
 		end },
 	-- Medallas del perfil
-	{ id = "medal1", cat = "community", name = L["Condecorados"], icon = "Interface\\Icons\\INV_Misc_Trophy_03",
+	{ id = "medal1", cat = "community", name = L["Condecorados"], icon = ns.ICONS .. "medal_ribbon",
 		desc = L["Un miembro consigue una medalla de oro."], eval = snapshot("goldMedals", 1) },
-	{ id = "medal2", cat = "community", name = L["Galería de héroes"], icon = "Interface\\Icons\\INV_Misc_Trophy_03",
+	{ id = "medal2", cat = "community", name = L["Galería de héroes"], icon = ns.ICONS .. "heroes",
 		desc = L["Sumad 10 medallas de oro entre toda la hermandad."], eval = snapshot("goldMedals", 10) },
-	{ id = "medalFull", cat = "community", name = L["Pecho de medallas"], icon = "Interface\\Icons\\INV_Misc_Trophy_02",
+	{ id = "medalFull", cat = "community", name = L["Pecho de medallas"], icon = ns.ICONS .. "medal_row",
 		desc = L["Un miembro tiene las 8 medallas del estuche (de cualquier grado)."], eval = snapshot("bestCase", 8) },
 	-- Cofre de hermandad
 	{ id = "chest1", cat = "community", name = L["Primer proyecto"], icon = "Interface\\Icons\\INV_Box_02",

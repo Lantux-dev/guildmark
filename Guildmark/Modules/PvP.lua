@@ -144,6 +144,49 @@ end
 
 -- "base" es el contador cuando el addon empezó a contar en esta hermandad: los
 -- oficiales comparan lo que ha subido desde entonces con las kills registradas.
+-- Muertes con honor en el mundo (estadística 381 de Forever, sin campos de batalla): cuenta
+-- a todos los que participan en la baja, también al sanador que no remata. El juego solo da
+-- el total de siempre, así que se apunta el valor al empezar cada día y la resta da las de
+-- los últimos 7 y 30 días. Antes de tener esos días, cuenta desde el primero apuntado.
+local WORLD_HK_STAT = 381
+local WORLD_KEEP_DAYS = 40
+ns.WORLD_HK_STAT = WORLD_HK_STAT
+
+function ns.MyWorldHK()
+	if not GetStatistic then return nil end
+	local ok, value = pcall(GetStatistic, WORLD_HK_STAT)
+	if not ok then return nil end
+	return tonumber(value) or (value == "--" and 0) or nil
+end
+
+-- { total, d7, d30, since } a partir de las anotaciones diarias (snapshots: [día] = valor).
+function ns.WorldHKWindows(total, snapshots, today)
+	local first
+	for day in pairs(snapshots) do
+		if not first or day < first then first = day end
+	end
+	local function since(days)
+		local from, best = today - days + 1, nil
+		for day in pairs(snapshots) do
+			if day >= from and (not best or day < best) then best = day end
+		end
+		return best and math.max(0, total - snapshots[best]) or 0
+	end
+	return { total = total, d7 = since(7), d30 = since(30), since = first and first * 86400 or nil }
+end
+
+local function worldHK()
+	local total = ns.MyWorldHK()
+	if not total then return nil end
+	local snaps = LG.db.char.worldHK
+	local today = math.floor(ns.Now() / 86400)
+	if snaps[today] == nil then snaps[today] = total end
+	for day in pairs(snaps) do
+		if day < today - WORLD_KEEP_DAYS then snaps[day] = nil end
+	end
+	return ns.WorldHKWindows(total, snaps, today)
+end
+
 table.insert(ns.recordProviders, function(rec)
 	local hk = firstValue(GetPVPLifetimeStats)
 	local guild = LG:GuildName()
@@ -160,5 +203,6 @@ table.insert(ns.recordProviders, function(rec)
 		yesterday = firstValue(GetPVPYesterdayStats),
 		week = firstValue(GetPVPThisWeekStats),
 		rank = ns.MyPvPRank(),
+		world = worldHK(), -- muertes con honor en el mundo: { total, d7, d30, since }
 	}
 end)

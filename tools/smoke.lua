@@ -1849,6 +1849,111 @@ do
 	print_("OK sincronización en trozos: un SYNC grande sale en varios mensajes y llega completo")
 end
 
+-- 1.2.0: rachas de bajas sin caer y clasificación de cazadores.
+do
+	local saved = g.kills
+	g.kills = {}
+	local now, n = ns.Now(), 0
+	local function add(kind, who, dt, extra)
+		n = n + 1
+		local k = { id = "st" .. n, kind = kind, t = now - dt, reporter = who, honorable = kind == "kill" or nil }
+		if kind == "kill" then k.killerName, k.victimName, k.guild = who, "Víctima" .. (n % 2), "Enemigos" else k.victimName, k.killerName = who, "Enemigo" end
+		for key, v in pairs(extra or {}) do k[key] = v end
+		g.kills[k.id] = k
+	end
+	-- Ana: 4 bajas, cae, 6 bajas seguidas (la última, ahora).
+	for i = 1, 4 do add("kill", "Ana Sol", 1000 - i) end
+	add("death", "Ana Sol", 900)
+	for i = 1, 6 do add("kill", "Ana Sol", 800 - i * 10) end
+	-- Una de campo de batalla y una sin honor no cuentan; una muerte en campo de batalla no corta.
+	add("kill", "Ana Sol", 500, { bg = true })
+	add("kill", "Ana Sol", 400, { honorable = false })
+	add("death", "Ana Sol", 300, { bg = true })
+	-- Thorvi: 2 bajas y cae.
+	add("kill", "Thorvi Martillo", 700); add("kill", "Thorvi Martillo", 650); add("death", "Thorvi Martillo", 600)
+	local st = ns.KillStreaks(g)
+	assert(st["Ana Sol"].current == 6 and st["Ana Sol"].best == 6, "racha en curso de 6 (la muerte la cortó en 4)")
+	assert(st["Ana Sol"].reached[5], "llegó a 5")
+	assert(st["Thorvi Martillo"].current == 0 and st["Thorvi Martillo"].best == 2, "cayó: racha a cero, mejor 2")
+	local board = ns.HunterBoard(7)
+	assert(board[1].name == "Ana Sol" and board[1].deaths == 1 and board[2].name == "Thorvi Martillo", "clasificación por bajas, sin campos de batalla")
+	ns.InvalidateAchievements()
+	local s1 = ns.AchievementState().byId.streak1
+	assert(s1 and s1.done and s1.doneAt == st["Ana Sol"].reached[5], "logro Imparable con la fecha de la 5.ª")
+	assert(not ns.AchievementState().byId.streak2.done, "Sin piedad aún no")
+	assert(ns.StreakTitle(6) ~= ns.StreakTitle(3), "nombre de racha por tamaño")
+	g.kills = saved
+	ns.InvalidateAchievements()
+	print_("OK rachas: cortan las muertes, sin campos de batalla, clasificación y logros")
+end
+
+-- 1.2.0: participación (muertes con honor en el mundo del juego, por ventanas de días).
+do
+	local today = 20000
+	-- Apuntado hace 40, 10, 6 y 0 días.
+	local w = ns.WorldHKWindows(300, { [today - 40] = 50, [today - 10] = 200, [today - 6] = 250, [today] = 290 }, today)
+	assert(w.d7 == 50 and w.d30 == 100 and w.total == 300, "7 días desde el día -6, 30 desde el -10 (el -40 queda fuera)")
+	local fresh = ns.WorldHKWindows(30, { [today] = 20 }, today)
+	assert(fresh.d7 == 10 and fresh.d30 == 10 and fresh.since == today * 86400, "recién instalado: desde el primer día")
+	local savedMembers = g.members
+	g.members = {
+		["Sana Dora"] = { name = "Sana Dora", class = "PRIEST", pvp = { world = { total = 500, d7 = 40, d30 = 90, since = 0 } } },
+		["Rema Tador"] = { name = "Rema Tador", class = "ROGUE", pvp = { world = { total = 300, d7 = 25, d30 = 120, since = 0 } } },
+		["Vieja Version"] = { name = "Vieja Version", class = "MAGE", pvp = { hk = 900 } },
+	}
+	local b7 = ns.WorldBoard(g, 7)
+	assert(#b7 == 2 and b7[1].name == "Sana Dora" and b7[1].n == 40, "7 días: la sanadora primera; sin datos del mundo no sale")
+	assert(ns.WorldBoard(g, 30)[1].name == "Rema Tador", "30 días: otro orden")
+	local all = ns.WorldBoard(g, 0)
+	assert(all[1].name == "Sana Dora" and all[1].n == 500 and not all[1].partial, "total: la estadística tal cual, desde el primer día")
+	g.members = savedMembers
+	print_("OK participación: ventanas de 7 y 30 días y clasificación por muertes con honor en el mundo")
+end
+
+-- 1.1.5: repaso de kills entre conectados. A quien se le perdió el aviso de una kill de
+-- otro miembro se la pide (KREQ) al ver su resumen (KSUM), y el autor se la devuelve (FILL).
+do
+	local savedSend, savedLST = LG.Send, LG.ScheduleTimer
+	local sent, timers = {}, {}
+	LG.Send = function(_, kind, data, channel, target) sent[#sent + 1] = { kind = kind, data = data, channel = channel, target = target } end
+	LG.ScheduleTimer = function(_, fn) if type(fn) == "function" then timers[#timers + 1] = fn end return 1 end
+	local function kill(id, reporter, t)
+		return { id = id, kind = "kill", t = t, reporter = reporter, killerName = reporter, victimName = "Enemigo", honorable = true }
+	end
+	local now, me = ns.Now(), ns.PlayerFullName()
+	g.kills["ksum:a1"] = kill("ksum:a1", "Ana Sol", now - 30)
+	-- Ana tiene 2 de hoy; aquí solo llegó 1.
+	ns.handlers.KSUM("Ana Sol", { days = { [math.floor(now / 86400)] = 2 } }, "GUILD", "Ana Sol")
+	assert(#timers == 1, "falta una de Ana: se pide")
+	table.remove(timers, 1)()
+	assert(#sent == 1 and sent[1].kind == "KREQ" and sent[1].channel == "WHISPER" and sent[1].target == "Ana Sol", "pide por susurro a la autora")
+	-- Con todas, no se pide nada.
+	sent = {}
+	ns.handlers.KSUM("Ana Sol", { days = { [math.floor(now / 86400)] = 1 } }, "GUILD", "Ana Sol")
+	assert(#timers == 0 and #sent == 0, "las tiene todas: no pide")
+	-- Lado del autor: devuelve solo las suyas de los días pedidos.
+	g.kills["ksum:m1"] = kill("ksum:m1", me, now - 20)
+	g.kills["ksum:m2"] = kill("ksum:m2", me, now - 3 * 86400)
+	ns.handlers.KREQ("Ana Sol", { days = { math.floor(now / 86400) } }, "WHISPER", "Ana Sol")
+	assert(#sent == 1 and sent[1].kind == "FILL", "responde con FILL")
+	local ids = {}
+	for _, k in ipairs(sent[1].data.kills) do ids[k.id] = true end
+	assert(ids["ksum:m1"] and not ids["ksum:m2"] and not ids["ksum:a1"], "solo las suyas del día pedido")
+	sent = {}
+	ns.handlers.KREQ("Ana Sol", { days = { math.floor(now / 86400) } }, "WHISPER", "Ana Sol")
+	assert(#sent == 0, "a la misma persona, como mucho una vez por minuto")
+	-- Y quien la recibe la guarda.
+	g.kills["ksum:m1"] = nil
+	ns.handlers.FILL("Ana Sol", { kills = { kill("ksum:m1", me, now - 20) } }, "WHISPER")
+	assert(g.kills["ksum:m1"], "la kill que faltaba llega")
+	-- Resumen propio: solo de hoy y ayer.
+	local days, total = ns.KillDays(g, me)
+	assert(total >= 1 and not days[math.floor((now - 3 * 86400) / 86400)], "resumen de hoy y ayer")
+	g.kills["ksum:a1"], g.kills["ksum:m1"], g.kills["ksum:m2"] = nil, nil, nil
+	LG.Send, LG.ScheduleTimer = savedSend, savedLST
+	print_("OK repaso de kills entre conectados: resumen, petición al autor, respuesta y guardado")
+end
+
 -- 1.1.3: la sincronización cuenta como hecha con el último trozo; quien ya tenía un logro
 -- avisa al que lo da por nuevo; el tesorero pasa la colecta a quien entra sin ella.
 do

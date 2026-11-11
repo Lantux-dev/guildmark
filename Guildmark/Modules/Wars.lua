@@ -495,7 +495,7 @@ function ns.WarRecord(season)
 		if league.min > 0 then
 			feats[#feats + 1] = { key = ("league:%d"):format(s), season = s, tier = league.min >= ns.WAR_LEAGUES[3].min and 3 or 2, title = (L["Liga de %s en la temporada %d"]):format(league.label, s),
 				desc = (L["Terminasteis la temporada %d con %d puntos de guerra."]):format(s, rec.rating), t = rec.last,
-				icon = league.min >= ns.WAR_LEAGUES[3].min and "Interface\\Icons\\INV_Misc_Trophy_03" or "Interface\\Icons\\INV_Misc_Trophy_02" }
+				icon = league.min >= ns.WAR_LEAGUES[3].min and ns.ICONS .. "trophy_gold" or ns.ICONS .. "trophy_silver" }
 		end
 		if rec.wins >= 3 and rec.losses == 0 then
 			feats[#feats + 1] = { key = ("unbeaten:%d"):format(s), season = s, title = (L["Invictos en la temporada %d"]):format(s),

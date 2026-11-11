@@ -43,6 +43,7 @@ function Hunt:OnEnable()
 	ns.RegisterEvent(self, "PLAYER_DEAD")
 	-- Golpe de gracia (tuyo o de tu grupo): llega aunque el registro de combate esté prohibido.
 	pcall(ns.RegisterEvent, self, "PARTY_KILL", function(_, a1, a2) self:OnPartyKill(a1, a2) end)
+	if ns.StartKillSummaries then ns.StartKillSummaries() end
 	self.lastKB = self:KillingBlows()
 	self:ScheduleRepeatingTimer("ShareCache", CACHE_SHARE_EVERY)
 	-- En Forever la muerte con honor llega como «Has recibido N p. de honor.», sin la víctima:
@@ -504,6 +505,7 @@ function Hunt:Publish(rec)
 	if not g then return end
 	ns.MergeKill(g, rec)
 	LG:Send("KILL", rec)
+	if ns.ScheduleKillSummary then ns.ScheduleKillSummary() end -- por si el aviso se pierde
 	ns.OnKillReceived(rec)
 	LG:DataChanged()
 end
@@ -662,6 +664,105 @@ function ns.HuntStats(days)
 		stats.dangerous[guild] = { name = best, n = n }
 	end
 	return stats
+end
+
+---------------------------------------------------------------------------
+-- Rachas y clasificación de cazadores (JcJ > Cazadores)
+--
+-- Racha: bajas con honor seguidas sin caer ante otro jugador, fuera de los campos de
+-- batalla. Cada miembro registra sus bajas y sus muertes, así que su racha sale solo de
+-- lo suyo y es la misma en todos los addons (las muertes ante monstruos no cortan).
+---------------------------------------------------------------------------
+
+ns.STREAK_TIERS = { 3, 5, 10, 20 }
+
+-- [miembro] = { current, since, best, bestAt, reached = { [n] = cuándo llegó a n } }
+function ns.KillStreaks(g)
+	g = g or LG:GuildData()
+	local byMember = {}
+	if not g then return byMember end
+	local lists = {}
+	for _, k in pairs(g.kills) do
+		local who = k.reporter
+		if who and not k.bg and not ns.IsVoided(g, k.id)
+			and ((k.kind == "kill" and k.honorable and k.killerName == who) or (k.kind == "death" and k.victimName == who)) then
+			lists[who] = lists[who] or {}
+			table.insert(lists[who], k)
+		end
+	end
+	for who, list in pairs(lists) do
+		table.sort(list, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.id < b.id end)
+		local s = { current = 0, best = 0, reached = {} }
+		for _, k in ipairs(list) do
+			if k.kind == "kill" then
+				if s.current == 0 then s.since = k.t end
+				s.current = s.current + 1
+				if s.current > s.best then s.best, s.bestAt = s.current, k.t end
+				if not s.reached[s.current] then s.reached[s.current] = k.t end
+			else
+				s.current, s.since = 0, nil
+			end
+		end
+		byMember[who] = s
+	end
+	return byMember
+end
+
+-- Clasificación de los últimos «days» días: { { name, kills, revenges, deaths, honor, best,
+-- current, since, victim, victimGuild, victimN } }, más bajas primero.
+function ns.HunterBoard(days)
+	local g = LG:GuildData()
+	local list = {}
+	if not g then return list, {} end
+	local since = ns.Now() - days * 86400
+	local streaks = ns.KillStreaks(g)
+	local by = {}
+	local function entry(name)
+		local e = by[name]
+		if not e then
+			local s = streaks[name] or {}
+			e = { name = name, kills = 0, revenges = 0, deaths = 0, honor = 0, best = s.best or 0, current = s.current or 0,
+				since = s.since, victims = {} }
+			by[name] = e
+		end
+		return e
+	end
+	for _, k in pairs(g.kills) do
+		if k.t >= since and not k.bg and not ns.IsVoided(g, k.id) then
+			if k.kind == "kill" and k.killerName then
+				local e = entry(k.killerName)
+				e.kills = e.kills + 1
+				e.honor = e.honor + (tonumber(k.honor) or 0)
+				if k.revenge then e.revenges = e.revenges + 1 end
+				if k.victimName then
+					local v = e.victims[k.victimName] or { n = 0, guild = k.guild }
+					v.n = v.n + 1
+					e.victims[k.victimName] = v
+				end
+			elseif k.kind == "death" and k.victimName then
+				local e = entry(k.victimName)
+				e.deaths = e.deaths + 1
+			end
+		end
+	end
+	for _, e in pairs(by) do
+		if e.kills > 0 then
+			-- Víctima favorita: la más repetida (a igualdad, por nombre, para que salga igual en todos).
+			for name, v in pairs(e.victims) do
+				if not e.victim or v.n > e.victimN or (v.n == e.victimN and name < e.victim) then
+					e.victim, e.victimN, e.victimGuild = name, v.n, v.guild
+				end
+			end
+			e.victims = nil
+			list[#list + 1] = e
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.kills ~= b.kills then return a.kills > b.kills end
+		if a.revenges ~= b.revenges then return a.revenges > b.revenges end
+		return a.name < b.name
+	end)
+	return list, streaks
 end
 
 -- Diagnóstico: las variantes del mensaje de honor de este cliente y los mensajes que no se
