@@ -38,6 +38,7 @@ local PROTOCOL = 1
 local JOIN_DELAY = 20        -- después de los canales del juego, para no quitarles su número
 local ANNOUNCE_EVERY = 600
 local ENTRY_TTL = 14 * 86400 -- las hermandades que no se anuncian en 2 semanas desaparecen
+local HUNTERS_KEEP = 2 * 3600 -- cazadores de un anuncio completo que sobreviven a anuncios de versiones antiguas
 local MAX_JOIN_TRIES = 3
 
 local LibSerialize = LibStub("LibSerialize")
@@ -272,7 +273,13 @@ function ns.GuildAnnouncement()
 		if r.online then online = online + 1 end
 	end
 	local record = ns.WarRecord and ns.WarRecord() or {}
+	-- Cobertura: cuántos registros (bajas y mazmorras de los últimos 30 días) hay detrás de los
+	-- números. Quien recibe se queda con el anuncio más completo, no con el último que llega.
+	local cov, since = 0, ns.Now() - 30 * 86400
+	for _, k in pairs(g.kills) do if (k.t or 0) >= since then cov = cov + 1 end end
+	for _, r in pairs(g.runs) do if (r.t or 0) >= since then cov = cov + 1 end end
 	return {
+		cov = cov,
 		guild = guild,
 		faction = UnitFactionGroup and UnitFactionGroup("player") or nil,
 		members = members,
@@ -290,6 +297,8 @@ end
 
 function Network:Announce(force)
 	if not LG:HasConsent() or not channelIndex() then return end
+	-- Recién conectado, con los datos de la hermandad a medias: no se anuncia todavía.
+	if ns.SyncSettled and not ns.SyncSettled() then return end
 	local guild = LG:GuildName()
 	if not guild then return end
 	local last = heard[guild]
@@ -315,8 +324,11 @@ end
 ns.netHandlers.HI = function(sender, d)
 	local guild = str(d.guild, 48)
 	if not guild then return end
-	heard[guild] = GetTime()
-	if guild == LG:GuildName() then return end
+	-- Un anuncio sin resumen de cazadores viene de una versión anterior a la 1.2.0: no cuenta como
+	-- «ya se ha anunciado», para que un miembro con la versión nueva mande el suyo completo.
+	if type(d.hunters) == "table" then heard[guild] = GetTime() end
+	-- La propia hermandad también se guarda (para verla con un alter de otra hermandad); mientras
+	-- estás en ella, ns.Directory() no la devuelve y se ve con los datos en vivo.
 	local dir = LG.db.global.directory
 	if d.hidden then
 		if dir[guild] then
@@ -335,13 +347,24 @@ ns.netHandlers.HI = function(sender, d)
 			trophies[#trophies + 1] = { title = str(tr.title, 80), sub = str(tr.sub, 80), t = num(tr.t, 4102444800) }
 		end
 	end
+	-- Números (temporada y cazadores): cada miembro los calcula con lo que tiene. Durante
+	-- HUNTERS_KEEP se conservan los del anuncio más completo (cobertura) y los de un anuncio de
+	-- versión antigua (sin cazadores) nunca pisan a los de uno nuevo.
+	local hunters = ns.SanitizeHunterSummary and ns.SanitizeHunterSummary(d.hunters) or nil
+	local stats = ns.SanitizeSeasonStats and ns.SanitizeSeasonStats(d.stats) or nil
+	local cov, huntersT = num(d.cov, 1000000) or 0, ns.Now()
+	local old = dir[guild]
+	if old and old.hunters and ns.Now() - (old.huntersT or old.t or 0) < HUNTERS_KEEP
+		and (not hunters or cov < (old.cov or 0) * 0.97) then
+		hunters, stats, cov, huntersT = old.hunters, old.stats or stats, old.cov or 0, old.huntersT or old.t
+	end
 	dir[guild] = {
 		guild = guild, faction = d.faction,
 		members = num(d.members, 1000), online = num(d.online, 1000), addon = num(d.addon, 1000),
 		rating = num(d.rating, 5000), wins = num(d.wins), losses = num(d.losses), draws = num(d.draws),
 		trophies = trophies, t = ns.Now(), by = sender,
-		stats = ns.SanitizeSeasonStats and ns.SanitizeSeasonStats(d.stats) or nil,
-		hunters = ns.SanitizeHunterSummary and ns.SanitizeHunterSummary(d.hunters) or nil,
+		stats = stats, cov = cov,
+		hunters = hunters, huntersT = hunters and huntersT or nil,
 		-- De la red de pruebas: solo se ve en modo prueba (y caduca como las demás).
 		test = LG:InTestMode() or nil, live = LG:InTestMode() or nil,
 	}
@@ -365,10 +388,11 @@ function ns.Directory()
 	local dir = LG.db.global.directory
 	local now = ns.Now()
 	local test = LG:InTestMode()
+	local mine = LG:GuildName()
 	for guild, e in pairs(dir) do
 		if (not e.test or e.live) and now - (e.t or 0) > ENTRY_TTL then
 			dir[guild] = nil
-		elseif (e.test and true or false) == test then
+		elseif (e.test and true or false) == test and guild ~= mine then
 			list[#list + 1] = e
 		end
 	end

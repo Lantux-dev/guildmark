@@ -1409,63 +1409,157 @@ end
 -- Caza
 ---------------------------------------------------------------------------
 
+-- JcJ > Objetivos: ranking de hermandades enemigas, a quién más cazamos o quién más nos mata,
+-- en tarjetas con su estandarte de fondo (si alguien de la hermandad lo ha visto). Las que son
+-- objetivo de caza van marcadas; los oficiales las ponen y quitan desde aquí.
+-- Iniciales de una hermandad: la primera letra de sus dos primeras palabras (o las dos primeras
+-- de una sola). Por caracteres UTF-8, para nombres como «We Løve PvP».
+function ns.GuildInitials(name)
+	local words = {}
+	-- Sin palabras de enlace en minúscula (of, the, de, la, los…): «Darkness of the Fallen» → DF.
+	for word in tostring(name or ""):gmatch("[^%s%p]+") do
+		if not (#word <= 3 and word == word:lower() and #words > 0) then words[#words + 1] = word end
+	end
+	local function chars(w)
+		local out = {}
+		for ch in w:gmatch("[%z\1-\127\194-\244][\128-\191]*") do out[#out + 1] = ch end
+		return out
+	end
+	if #words == 0 then return "?" end
+	if #words == 1 then
+		local c = chars(words[1])
+		return ((c[1] or "") .. (c[2] or "")):upper()
+	end
+	return ((chars(words[1])[1] or "") .. (chars(words[2])[1] or "")):upper()
+end
+-- Color heráldico a partir del nombre.
+ns.GUILD_COLORS = { { 0.6, 0.12, 0.1 }, { 0.12, 0.25, 0.6 }, { 0.13, 0.45, 0.2 }, { 0.45, 0.15, 0.5 }, { 0.65, 0.45, 0.08 },
+	{ 0.1, 0.45, 0.5 }, { 0.5, 0.25, 0.1 }, { 0.3, 0.3, 0.35 }, { 0.6, 0.2, 0.35 }, { 0.2, 0.35, 0.15 } }
+function ns.GuildColor(name)
+	local h = 0
+	for i = 1, #tostring(name or "") do h = (h * 31 + tostring(name):byte(i)) % 1000003 end
+	return ns.GUILD_COLORS[h % #ns.GUILD_COLORS + 1]
+end
+
 local function targetsView(g, rows)
 	local canManage = ns.CanManageEvents(ns.PlayerFullName())
-	local s = ns.HuntStats(7)
-
-	-- Hermandades objetivo: cartel con calavera, cuántas veces nos han matado y la recompensa.
-	header(rows, L["Objetivos de caza"], { ns.PublishButton("hunt") })
-	local targets = {}
-	for guild, how in pairs(ns.TargetGuilds()) do targets[#targets + 1] = { guild = guild, how = how } end
-	table.sort(targets, function(a, b) return (s.killedBy[a.guild] or 0) > (s.killedBy[b.guild] or 0) end)
-	if #targets == 0 then line(rows, grey(L["Ninguno. Salen solos cuando una hermandad nos mata, o los añade un oficial."]), 1) end
+	local mode = ns.targetsMode or "hunted"   -- "hunted": a quién más cazamos · "killedBy": quién más nos mata
+	local days = ns.targetsDays or 7          -- 7, 30 o 0 (todo lo guardado)
+	local since = days > 0 and (ns.Now() - days * 86400) or 0
+	local targets = ns.TargetGuilds()
 	local enemyFaction = (UnitFactionGroup("player") == "Alliance") and "Horde" or "Alliance"
-	for _, t in ipairs(targets) do
-		local deaths = s.killedBy[t.guild] or 0
-		local entry = ns.DirectoryEntry(t.guild)
-		local danger = s.dangerous[t.guild]
-		local foot = {}
-		if danger and danger.name then
-			foot[#foot + 1] = (L["Más peligroso: %s (%d)"]):format(ns.ShortName(danger.name), danger.n)
-		end
-		foot[#foot + 1] = t.how == "manual" and L["puesta por un oficial"] or L["objetivo automático (nos mata a menudo)"]
-		rows[#rows + 1] = {
-			kind = "card", state = "normal", accent = { 0.85, 0.2, 0.12 },
-			icon = ns.FactionBanner(entry and entry.faction or enemyFaction),
-			title = RED .. "<" .. t.guild .. ">" .. R,
-			desc = (deaths == 1 and L["nos ha matado 1 vez"] or (L["nos ha matado %d veces"]):format(deaths))
-				.. "  ·  " .. GREEN .. (L["%d cazados"]):format(s.hunted[t.guild] or 0) .. R,
-			status = GOLD .. L["10 insignias"] .. R,
-			foot = grey(table.concat(foot, "  ·  ")),
-			buttons = (canManage and t.how == "manual") and { { label = L["Quitar"], onClick = function() ns.ToggleTarget(t.guild) end } } or nil,
-		}
-	end
-	line(rows, grey(L["Kills que dan honor: 5 · hermandad objetivo o venganza: 10 (+5 la venganza) · misma víctima: 2 al día (la 3.ª a la mitad) · tope 100 al día"]), 1)
 
-	-- Nos cazan: hermandades que nos matan y no son objetivo, con el mismo cartel
-	-- que los objetivos pero más discreto y el botón para hacerlas objetivo.
-	local hunters7 = {}
-	for _, e in ipairs(sortedCounts(s.killedBy, 20)) do
-		if not ns.TargetGuilds()[e.key] and #hunters7 < 6 then hunters7[#hunters7 + 1] = e end
+	-- Por hermandad: bajas nuestras sobre ellos (una por muerte), muertes nuestras a sus manos,
+	-- nuestro mejor cazador contra ellos y su miembro más peligroso.
+	local by = {}
+	local function entry(guild)
+		local e = by[guild]
+		if not e then
+			e = { guild = guild, hunted = 0, killed = 0, ours = {}, theirs = {} }
+			by[guild] = e
+		end
+		return e
 	end
-	if #hunters7 > 0 then
-		space(rows)
-		header(rows, L["Nos cazan (7 días)"])
+	for id, k in pairs(g.kills) do
+		if (k.t or 0) >= since and not k.bg and not ns.IsVoided(g, id) then
+			local guild = k.guild or ns.NO_GUILD
+			if k.kind == "kill" then
+				local e = entry(guild)
+				if not ns.IsDuplicateKill(g, id) then e.hunted = e.hunted + 1 end
+				if k.killerName then e.ours[k.killerName] = (e.ours[k.killerName] or 0) + 1 end
+			elseif k.kind == "death" and not ns.IsDuplicateKill(g, id) then
+				local e = entry(guild)
+				e.killed = e.killed + 1
+				if k.killerName then e.theirs[k.killerName] = (e.theirs[k.killerName] or 0) + 1 end
+			end
+		end
 	end
-	for _, e in ipairs(hunters7) do
-		local loose = e.key == ns.NO_GUILD -- jugadores sueltos: ni estandarte ni objetivo
-		local entry = not loose and ns.DirectoryEntry(e.key)
-		local danger = s.dangerous[e.key]
+	local function best(t)
+		local name, n = nil, 0
+		for who, c in pairs(t) do if c > n or (c == n and name and who < name) then name, n = who, c end end
+		return name, n
+	end
+	local list = {}
+	for _, e in pairs(by) do
+		e.value = mode == "hunted" and e.hunted or e.killed
+		if e.value > 0 and e.guild ~= ns.NO_GUILD then list[#list + 1] = e end
+	end
+	table.sort(list, function(a, b)
+		if a.value ~= b.value then return a.value > b.value end
+		return a.guild < b.guild
+	end)
+
+	header(rows, L["Hermandades enemigas"], { ns.PublishButton("hunt") })
+	ns.CyclerRow(rows, grey(L["Ranking"]), { { key = "hunted", label = L["A quién más cazamos"] }, { key = "killedBy", label = L["Quién más nos mata"] } },
+		mode, function(k) ns.targetsMode = k end)
+	ns.CyclerRow(rows, grey(L["Periodo"]), { { key = 7, label = (L["%d días"]):format(7) }, { key = 30, label = (L["%d días"]):format(30) }, { key = 0, label = L["Total"] } },
+		days, function(k) ns.targetsDays = k end)
+	if #list == 0 then
+		line(rows, grey(mode == "hunted" and L["Todavía no hemos cazado a nadie en este periodo."] or L["Nadie nos ha matado en este periodo."]), 1)
+	end
+	for i = 1, math.min(12, #list) do
+		local e = list[i]
+		local dir = ns.DirectoryEntry(e.guild)
+		local how = targets[e.guild]
+		local ourName, ourN = best(e.ours)
+		local theirName, theirN = best(e.theirs)
+		local balance = e.hunted - e.killed
+		local foot = {}
+		if ourName then foot[#foot + 1] = (L["Nuestro mejor cazador: %s (%d)"]):format(ns.ShortName(ourName), ourN) end
+		if theirName then foot[#foot + 1] = (L["Su más peligroso: %s (%d)"]):format(ns.ShortName(theirName), theirN) end
+		if how then foot[#foot + 1] = GOLD .. (how == "manual" and L["objetivo (puesto por un oficial)"] or L["objetivo automático"]) .. R end
+		local buttons
+		if canManage then
+			if how == "manual" then buttons = { { label = L["Quitar"], onClick = function() ns.ToggleTarget(e.guild) end } }
+			elseif not how then buttons = { { label = L["Objetivo"], onClick = function() ns.ToggleTarget(e.guild) end } } end
+		end
+		-- Rivalidad: la barra (verde lo nuestro, rojo lo suyo) y el balance en grande. El 1.º de cada
+		-- lista lleva su título: la presa favorita o la némesis (nada de medallas: no son campeones).
+		local tag = i == 1 and (mode == "hunted" and (GREEN .. L["Presa favorita"] .. R) or (RED .. L["Némesis"] .. R)) or nil
 		rows[#rows + 1] = {
-			kind = "card", state = "normal", accent = { 0.55, 0.3, 0.2 },
-			icon = loose and ICON_SKULL or ns.FactionBanner(entry and entry.faction or enemyFaction),
-			title = loose and grey(ns.NO_GUILD) or (RED .. "<" .. e.key .. ">" .. R),
-			desc = (e.n == 1 and L["nos ha matado 1 vez"] or (L["nos ha matado %d veces"]):format(e.n))
-				.. "  ·  " .. GREEN .. (L["%d cazados"]):format(s.hunted[e.key] or 0) .. R,
-			foot = danger and danger.name and grey((L["Más peligroso: %s (%d)"]):format(ns.ShortName(danger.name), danger.n)) or nil,
-			buttons = (canManage and not loose) and { { label = L["Objetivo"], onClick = function() ns.ToggleTarget(e.key) end } } or nil,
+			kind = "card", state = "normal",
+			accent = mode == "hunted" and { 0.3, 0.7, 0.3 } or { 0.85, 0.2, 0.12 },
+			crestIcon = { tabard = g.guildTabards and g.guildTabards[e.guild] or nil, initials = ns.GuildInitials(e.guild), color = ns.GuildColor(e.guild) },
+			tabard = g.guildTabards and g.guildTabards[e.guild] or nil,
+			title = GREY .. i .. R .. "   " .. RED .. "<" .. e.guild .. ">" .. R .. (tag and ("   " .. tag) or ""),
+			duel = { left = e.hunted, right = e.killed },
+			status = balance > 0 and (GREEN .. "+" .. balance .. R) or (balance < 0 and (RED .. balance .. R) or grey("0")),
+			statusLarge = true,
+			foot = grey(table.concat(foot, "  ·  ")),
+			buttons = buttons,
+			tooltip = { "<" .. e.guild .. ">", GREEN .. (L["%d cazados"]):format(e.hunted) .. R .. "  ·  "
+				.. (e.killed == 0 and L["no nos ha matado"] or (e.killed == 1 and L["nos ha matado 1 vez"] or (L["nos ha matado %d veces"]):format(e.killed)))
+				.. "\n" .. grey(L["Verde: los que hemos cazado. Rojo: los nuestros que han caído. A la derecha, el balance."]) },
 		}
 	end
+
+	-- Jugadores sin hermandad: aparte (no son una hermandad que compita en el ranking).
+	local loose = by[ns.NO_GUILD]
+	if loose and (loose.hunted > 0 or loose.killed > 0) then
+		line(rows, ("|T%s:16:16|t  %s  %s  ·  %s"):format(ICON_SKULL, grey(L["Jugadores sin hermandad:"]), GREEN .. (L["%d cazados"]):format(loose.hunted) .. R,
+			loose.killed == 0 and grey(L["no nos ha matado"]) or (RED .. (loose.killed == 1 and L["nos ha matado 1 vez"] or (L["nos ha matado %d veces"]):format(loose.killed)) .. R)), 1, { tall = true })
+	end
+
+	-- Objetivos de caza que no salen en el ranking de este periodo (puestos por un oficial).
+	local quiet = {}
+	for guild, how in pairs(targets) do
+		local shown = false
+		for i = 1, math.min(12, #list) do if list[i].guild == guild then shown = true end end
+		if not shown then quiet[#quiet + 1] = { guild = guild, how = how } end
+	end
+	if #quiet > 0 then
+		table.sort(quiet, function(a, b) return a.guild < b.guild end)
+		space(rows)
+		header(rows, L["Otros objetivos de caza"])
+		for _, t in ipairs(quiet) do
+			line(rows, RED .. "<" .. t.guild .. ">" .. R .. "  " .. grey(t.how == "manual" and L["puesta por un oficial"] or L["objetivo automático (nos mata a menudo)"]), 1, {
+				buttons = (canManage and t.how == "manual") and { { label = L["Quitar"], onClick = function() ns.ToggleTarget(t.guild) end } } or nil,
+			})
+		end
+	end
+	space(rows)
+	line(rows, grey(L["Kills que dan honor: 5 · hermandad objetivo o venganza: 10 (+5 la venganza) · misma víctima: 2 al día (la 3.ª a la mitad) · tope 100 al día"]), 1)
+	line(rows, grey(L["El estandarte de cada hermandad sale cuando alguien de la nuestra ve a uno de sus miembros (placa, objetivo o ratón)."]), 1)
 end
 
 -- JcJ > Registro: últimas kills y muertes de la hermandad (sin campos de batalla).
@@ -2228,6 +2322,7 @@ local function streakTitle(n)
 	return L["En racha"]
 end
 ns.StreakTitle = streakTitle
+ns.PODIUM, ns.PlaceText = PODIUM, placeText -- también para JcE (récords e historial)
 
 
 local function kd(e)
@@ -2652,42 +2747,145 @@ local function lfgView(g, rows)
 	line(rows, grey(L["Los grupos desaparecen solos a las 2 horas. Al invitar a alguien su plaza queda ocupada."]))
 end
 
+-- Nombre en un tiempo de mazmorra: los de la hermandad con el color de su clase; los de fuera
+-- en gris apagado (en blanco parecían sacerdotes).
+function ns.RunMemberName(g, name)
+	local m = g.members[name]
+	if m then return ns.ClassColorName(name, m.class) end
+	return "|cff7d7d7d" .. (ns.ShortName(name) or "?") .. "|r"
+end
+
+-- JcE › Récords: intento oficial arriba y una tarjeta por mazmorra con su podio oficial.
 local function timesView(g, rows)
+	local me = ns.PlayerFullName()
+	local WATCH = "Interface\\Icons\\INV_Misc_PocketWatch_01"
+	local function names(list)
+		local out = {}
+		for _, name in ipairs(list) do out[#out + 1] = ns.RunMemberName(g, name) end
+		return table.concat(out, ", ")
+	end
+
+	-- 1. Intento oficial: lo único que cuenta para los récords.
+	header(rows, L["Intento oficial"])
+	local attempt = ns.CurrentAttempt()
+	if attempt then
+		local paid, allPaid, n = ns.AttemptPaid(g, attempt)
+		local list = {}
+		for _, m in ipairs(attempt.members) do list[#list + 1] = (paid[m] and ICON_YES or ICON_NO) .. " " .. ns.RunMemberName(g, m) end
+		rows[#rows + 1] = {
+			kind = "card", state = "normal", accent = allPaid and ns.ACCENT.good or ns.ACCENT.mine,
+			icon = "Interface\\Icons\\INV_Misc_PocketWatch_02",
+			title = allPaid and L["Intento oficial en marcha"] or (L["Intento oficial: faltan pagos (%d/%d)"]):format(n, #attempt.members),
+			desc = table.concat(list, "   "),
+			status = allPaid and (GREEN .. L["cuenta para los récords"] .. R) or (GOLD .. (L["%d insignias cada uno"]):format(ns.OFFICIAL_FEE) .. R),
+			foot = grey(allPaid and L["Cada jefe te avisa del ritmo contra el récord de la hermandad."]
+				or L["Cuenta cuando paguen todos. Si la partida no se completa, lo pagado se pierde."]),
+			buttons = not paid[me] and { { label = (L["Pagar %d"]):format(ns.OFFICIAL_FEE), onClick = function() ns.PayAttempt(attempt.id) end } } or nil,
+		}
+	else
+		local members, why = ns.FullGuildGroup()
+		line(rows, grey((L["Solo cuentan para los récords las partidas oficiales: el grupo entero de la hermandad (5/5, o la banda entera), declarado antes de la primera baja, y %d insignias cada uno."]):format(ns.OFFICIAL_FEE)), 1, {
+			icon = WATCH, tall = true, desaturate = not members,
+			buttons = { { label = L["Declarar intento oficial"], disabled = not members, onClick = function()
+				local ok, err = ns.DeclareAttempt()
+				if not ok and err then LG:Print(err) end
+			end } },
+			tooltip = { L["Intento oficial"], members and (L["Pagáis %d insignias cada uno. El tiempo empieza con la primera baja."]):format(ns.OFFICIAL_FEE) or why },
+		})
+	end
+
+	-- 2. Récords de la hermandad: podio oficial de cada mazmorra.
+	space(rows)
+	header(rows, L["Récords de la hermandad"])
 	local times = ns.DungeonTimes()
-	header(rows, L["Tiempos de mazmorra"])
 	if #times == 0 then
-		line(rows, grey(L["Todavía no hay tiempos. Se miden desde que el grupo entra en la mazmorra hasta que cae su jefe final."]), 1,
-			{ icon = "Interface\\Icons\\INV_Misc_PocketWatch_01", desaturate = true, tall = true })
+		line(rows, grey(L["Todavía no hay récords oficiales. Declarad un intento oficial con el grupo entero de la hermandad."]), 1,
+			{ icon = WATCH, desaturate = true, tall = true })
 	end
 	for _, d in ipairs(times) do
 		local best = d.runs[1]
-		local names = {}
-		for _, name in ipairs(best.members) do
-			local m = g.members[name]
-			names[#names + 1] = ns.ClassColorName(name, m and m.class)
-		end
 		local key = "times|" .. d.dungeon
-		-- Si el mejor tiempo lo hizo una tribu (3 o más de sus miembros): su icono y su nombre delante.
+		-- Si el récord lo hizo una tribu (3 o más de sus miembros): su icono y su nombre delante.
 		local tribe = ns.TribeTogether and ns.TribeTogether(best.members)
-		local tex, custom = "Interface\\Icons\\INV_Misc_PocketWatch_01", false
+		local tex, custom = WATCH, false
 		if tribe then tex, custom = ns.TribeIconTexture(ns.TribeIcon(tribe)) end
 		rows[#rows + 1] = {
-			kind = "card", state = "normal",
+			kind = "card", state = "normal", accent = ns.PODIUM[1].color,
 			icon = tex, iconBare = custom, iconCoords = custom and { 0, 1, 0, 1 } or nil,
-			title = d.dungeon,
-			desc = (tribe and (GOLD .. "«" .. tribe.name .. "»" .. R .. "  ") or "") .. table.concat(names, ", "),
+			title = ns.PODIUM[1].text .. d.dungeon .. R,
+			art = ns.DungeonArt(best.instanceID),
+			desc = (tribe and (GOLD .. "«" .. tribe.name .. "»" .. R .. "  ") or "") .. names(best.members),
 			status = GOLD .. ns.FormatRunTime(best.duration) .. R,
-			foot = grey((L["%s · %d/5 de la hermandad · %d partidas"]):format(date("%d/%m", best.t), best.guildCount, #d.runs)),
-			onClick = #d.runs > 1 and toggle(key, false) or nil,
-			tooltip = #d.runs > 1 and { d.dungeon, grey(L["Clic para ver los demás tiempos."]) } or nil,
+			foot = grey((L["%s · %d partidas oficiales · clic: parciales"]):format(date("%d/%m", best.t), #d.runs))
+				.. (best.flawless and ("  " .. GREEN .. L["sin muertes"] .. R) or ""),
+			onClick = toggle(key, false),
 		}
+		for i = 2, math.min(3, #d.runs) do
+			local r = d.runs[i]
+			rows[#rows + 1] = { indent = 2, tall = true, iconOffset = 30,
+				cols = { { ns.PlaceText(i), 30 }, { ns.PODIUM[i].text .. ns.FormatRunTime(r.duration) .. R, 80 }, { names(r.members), 380 }, { grey(date("%d/%m", r.t)), 60 } } }
+		end
 		if isOpen(key, false) then
-			for i = 2, math.min(5, #d.runs) do
-				local r = d.runs[i]
-				local others = {}
-				for _, name in ipairs(r.members) do others[#others + 1] = ns.ShortName(name) end
-				line(rows, ("%s%d.|r  %s%s|r  %s  %s"):format(GREY, i, GOLD, ns.FormatRunTime(r.duration), table.concat(others, ", "),
-					grey(date("%d/%m", r.t))), 2)
+			for _, b in ipairs(best.bosses) do
+				line(rows, ("%s%s|r  %s"):format(GOLD, ns.FormatRunTime(math.max(0, b.split)), b.final and (GREEN .. (b.boss or "?") .. R) or (b.boss or "?")), 3)
+			end
+		end
+	end
+end
+
+-- JcE › Historial: una tarjeta por partida (3 o más de la hermandad), la más reciente arriba,
+-- con el grupo, muertes, oro, jefes y el botín raro o mejor; clic para los parciales.
+function ns.JceHistoryView(g, rows)
+	local WATCH = "Interface\\Icons\\INV_Misc_PocketWatch_01"
+	local SKULL = "|TInterface\\TargetingFrame\\UI-TargetingFrame-Skull:14:14|t"
+	local records = {}
+	for _, d in ipairs(ns.DungeonTimes()) do records[d.runs[1].key] = true end
+	header(rows, L["Historial"])
+	local history = ns.DungeonHistory(30)
+	if #history == 0 then
+		line(rows, grey(L["Todavía no hay partidas. Cuentan las de 3 o más de la hermandad; el tiempo va de la primera baja al jefe final."]), 1,
+			{ icon = WATCH, desaturate = true, tall = true })
+	end
+	for _, run in ipairs(history) do
+		local key = "hist|" .. run.key
+		local members = {}
+		for _, name in ipairs(run.members) do members[#members + 1] = ns.RunMemberName(g, name) end
+		local chips = { grey(date("%d/%m %H:%M", run.t)) }
+		if next(run.reporters) then
+			chips[#chips + 1] = run.flawless and (GREEN .. L["sin muertes"] .. R)
+				or (SKULL .. " " .. ((run.deaths == 1) and L["1 muerte"] or (L["%d muertes"]):format(run.deaths)))
+			if run.gold > 0 then chips[#chips + 1] = ns.MoneyText and ns.MoneyText(run.gold) or tostring(run.gold) end
+		end
+		chips[#chips + 1] = grey((L["%d jefes"]):format(#run.bosses))
+		if run.official then chips[#chips + 1] = GOLD .. L["oficial"] .. R end
+		local isRecord = records[run.key]
+		rows[#rows + 1] = {
+			kind = "card", state = run.finished and "normal" or "off",
+			accent = isRecord and ns.PODIUM[1].color or (run.official and ns.ACCENT.good or nil),
+			icon = run.flawless and "Interface\\Icons\\Spell_Holy_InnerFire" or WATCH,
+			title = (isRecord and (ns.PODIUM[1].text .. L["Récord"] .. " · " .. R) or "") .. run.dungeon,
+			art = ns.DungeonArt(run.instanceID),
+			desc = table.concat(members, ", "),
+			status = run.finished and (GOLD .. ns.FormatRunTime(run.duration) .. R) or grey(L["sin terminar"]),
+			foot = table.concat(chips, "  ·  "),
+			onClick = toggle(key, false),
+			tooltip = { run.dungeon, (L["%d/%d de la hermandad · %d jefes · clic: parciales"]):format(run.guildCount, run.size, #run.bosses) },
+		}
+		-- Botín: iconos con el color de su calidad; al pasar el ratón, qué y para quién.
+		if #run.loot > 0 then
+			local icons, tip = {}, { L["Botín"] }
+			for _, x in ipairs(run.loot) do
+				local icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(x.id)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+				local name = ns.GetItemInfo(x.id) or ("#" .. x.id)
+				local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[x.q] and ITEM_QUALITY_COLORS[x.q].hex or "|cffffffff"
+				icons[#icons + 1] = ("|T%s:20:20|t"):format(icon)
+				tip[#tip + 1] = ("|T%s:16:16|t %s%s|r  %s"):format(icon, color, name, ns.RunMemberName(g, x.who))
+			end
+			line(rows, table.concat(icons, " "), 2, { tooltip = tip })
+		end
+		if isOpen(key, false) then
+			for _, b in ipairs(run.bosses) do
+				line(rows, ("%s%s|r  %s"):format(GOLD, ns.FormatRunTime(math.max(0, b.split)), b.final and (GREEN .. (b.boss or "?") .. R) or (b.boss or "?")), 3)
 			end
 		end
 	end
@@ -2701,9 +2899,12 @@ views.pve = function()
 	for _ in pairs(mine and ns.lfgRequests[mine.id] or {}) do pending = pending + 1 end
 	segments(rows, "pve", {
 		{ key = "lfg", label = pending > 0 and (L["Buscar grupo"] .. " (" .. pending .. ")") or L["Buscar grupo"] },
-		{ key = "times", label = L["Tiempos"] },
+		{ key = "times", label = L["Récords"] },
+		{ key = "history", label = L["Historial"] },
 	})
-	if subview.pve == "times" then timesView(g, rows) else lfgView(g, rows) end
+	if subview.pve == "times" then timesView(g, rows)
+	elseif subview.pve == "history" then ns.JceHistoryView(g, rows)
+	else lfgView(g, rows) end
 	return rows
 end
 
@@ -4067,6 +4268,26 @@ local function getCardParts(row)
 	local c = {}
 	c.bg = row:CreateTexture(nil, "BACKGROUND")
 	c.bg:SetPoint("BOTTOMRIGHT", 0, 2)
+	-- Arte de fondo (p. ej. la pantalla de carga de la mazmorra) y una sombra para leer el texto.
+	c.art = row:CreateTexture(nil, "BACKGROUND", nil, 1)
+	c.art:SetPoint("BOTTOMRIGHT", 0, 2)
+	c.artShade = row:CreateTexture(nil, "BACKGROUND", nil, 2)
+	c.artShade:SetPoint("BOTTOMRIGHT", 0, 2)
+	c.artShade:SetTexture("Interface\\Buttons\\WHITE8x8")
+	-- Estandarte de una hermandad de fondo (spec.tabard), tenue a la derecha. Sin baño de su color
+	-- en la tarjeta: con estandartes azules, amarillos o blancos se comía el pergamino.
+	c.tabBg = row:CreateTexture(nil, "BACKGROUND", nil, 4)
+	c.tabBg:SetSize(70, 70)
+	c.tabBg:SetTexture("Interface\\GuildFrame\\GuildFrame")
+	c.tabBg:SetTexCoord(0.63183594, 0.69238281, 0.61914063, 0.74023438)
+	c.tabBorder = row:CreateTexture(nil, "BACKGROUND", nil, 6)
+	c.tabBorder:SetSize(69, 68)
+	c.tabBorder:SetPoint("TOPLEFT", c.tabBg, "TOPLEFT", 1, -1)
+	c.tabBorder:SetTexture("Interface\\GuildFrame\\GuildFrame")
+	c.tabBorder:SetTexCoord(0.63183594, 0.69238281, 0.74414063, 0.86523438)
+	c.tabEmblem = row:CreateTexture(nil, "BACKGROUND", nil, 5)
+	c.tabEmblem:SetSize(62, 70)
+	c.tabEmblem:SetPoint("CENTER", c.tabBg, "CENTER")
 	c.accent = row:CreateTexture(nil, "BORDER")
 	c.accent:SetWidth(4)
 	c.glow = row:CreateTexture(nil, "BORDER")
@@ -4089,6 +4310,35 @@ local function getCardParts(row)
 	c.status = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	c.status:SetPoint("TOPRIGHT", row, "TOPRIGHT", -14, -14)
 	c.status:SetJustifyH("RIGHT")
+	-- Escudo de una hermandad en el hueco del icono (spec.crestIcon): su estandarte si se conoce;
+	-- si no, un escudo de su color con sus iniciales.
+	c.ciBg = row:CreateTexture(nil, "ARTWORK")
+	c.ciBg:SetSize(46, 46)
+	c.ciBg:SetTexture("Interface\\GuildFrame\\GuildFrame")
+	c.ciBg:SetTexCoord(0.63183594, 0.69238281, 0.61914063, 0.74023438)
+	c.ciBorder = row:CreateTexture(nil, "ARTWORK", nil, 2)
+	c.ciBorder:SetSize(45, 45)
+	c.ciBorder:SetPoint("TOPLEFT", c.ciBg, "TOPLEFT", 1, -1)
+	c.ciBorder:SetTexture("Interface\\GuildFrame\\GuildFrame")
+	c.ciBorder:SetTexCoord(0.63183594, 0.69238281, 0.74414063, 0.86523438)
+	c.ciEmblem = row:CreateTexture(nil, "ARTWORK", nil, 1)
+	c.ciEmblem:SetPoint("CENTER", c.ciBg, "CENTER")
+	c.ciText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	c.ciText:SetPoint("CENTER", c.ciBg, "CENTER", 0, -1)
+	-- Barra de rivalidad (spec.duel = { left, right }): verde lo nuestro, rojo lo suyo.
+	c.duelBg = row:CreateTexture(nil, "ARTWORK")
+	c.duelBg:SetHeight(10)
+	c.duelBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+	c.duelFill = row:CreateTexture(nil, "ARTWORK", nil, 1)
+	c.duelFill:SetHeight(10)
+	c.duelFill:SetTexture("Interface\\Buttons\\WHITE8x8")
+	c.duelEdge = row:CreateTexture(nil, "ARTWORK", nil, 2)
+	c.duelEdge:SetSize(2, 14)
+	c.duelEdge:SetColorTexture(1, 0.95, 0.75, 0.9)
+	c.duelL = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	c.duelL:SetJustifyH("RIGHT")
+	c.duelR = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	c.duelR:SetJustifyH("LEFT")
 	row.card = c
 	return c
 end
@@ -4104,6 +4354,44 @@ local function layoutCard(row, spec, indentX)
 	row:SetHeight(CARD_H)
 	cardArt(c.bg, spec.state)
 	c.bg:SetPoint("TOPLEFT", indentX - 6, -2)
+	-- Arte: { texture, aspect }. Se recorta una franja centrada con la forma de la tarjeta.
+	local art = spec.art
+	c.art:SetShown(art ~= nil)
+	c.artShade:SetShown(art ~= nil)
+	if art then
+		c.art:SetPoint("TOPLEFT", indentX - 6, -2)
+		c.art:SetTexture(art.texture)
+		local w, h = CONTENT_WIDTH - indentX + 6, CARD_H - 4
+		local band = math.min(1, (art.aspect or 4 / 3) * h / w)
+		local top = math.max(0, 0.42 - band / 2)
+		c.art:SetTexCoord(0, 1, top, top + band)
+		c.art:SetAlpha(spec.state == "off" and 0.25 or 0.6)
+		c.art:SetDesaturated(spec.state == "off")
+		c.artShade:SetPoint("TOPLEFT", indentX - 6, -2)
+		c.artShade:SetGradient("HORIZONTAL", CreateColor and CreateColor(0, 0, 0, 0.88) or { r = 0, g = 0, b = 0, a = 0.88 },
+			CreateColor and CreateColor(0, 0, 0, 0.3) or { r = 0, g = 0, b = 0, a = 0.3 })
+	end
+
+	-- Estandarte: { bg, border, emblem = {r,g,b}, file, style } (Hunt.lua, ns.CaptureTabard).
+	local tab = spec.tabard
+	for _, part in ipairs({ c.tabBg, c.tabBorder, c.tabEmblem }) do part:SetShown(tab ~= nil) end
+	if tab then
+		local function color(t) return CreateColor and CreateColor(t[1], t[2], t[3], 1) end
+		c.tabBg:ClearAllPoints()
+		-- Marca de agua: grande, al borde y tenue. El escudo de la izquierda ya lo enseña entero;
+		-- este no puede tapar el texto de la tarjeta (antes, opaco, se comía la línea de abajo).
+		-- Cabe en la tarjeta (CARD_H - 4 por dentro): con 96 el círculo se salía por arriba y abajo.
+		c.tabBg:SetSize(70, 70)
+		c.tabBorder:SetSize(69, 68)
+		c.tabBg:SetPoint("RIGHT", row, "RIGHT", -80, 0)
+		c.tabEmblem:SetSize(62, 70)
+		local data = color(tab.bg) and { backgroundColor = color(tab.bg), borderColor = color(tab.border or { 0.2, 0.2, 0.2 }),
+			emblemColor = color(tab.emblem), emblemFileID = tab.file, emblemStyle = tab.style } or nil
+		local ok = data and SetLargeGuildTabardTextures and pcall(SetLargeGuildTabardTextures, nil, c.tabEmblem, c.tabBg, c.tabBorder, data)
+		if not ok then for _, part in ipairs({ c.tabBg, c.tabBorder, c.tabEmblem }) do part:Hide() end end
+		local a = spec.state == "off" and 0.08 or 0.15
+		c.tabBg:SetAlpha(a); c.tabBorder:SetAlpha(a); c.tabEmblem:SetAlpha(a)
+	end
 
 	-- Franja de color a la izquierda (y un brillo muy suave) para lo que pide atención.
 	local accent = spec.accent
@@ -4129,6 +4417,33 @@ local function layoutCard(row, spec, indentX)
 	c.icon:SetTexture(spec.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
 	if spec.iconCoords then c.icon:SetTexCoord(unpack(spec.iconCoords)) else c.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
 	c.icon:SetDesaturated(spec.desaturate or spec.state == "off")
+	local ci = spec.crestIcon
+	for _, part in ipairs({ c.ciBg, c.ciBorder, c.ciEmblem, c.ciText }) do part:SetShown(ci ~= nil) end
+	if ci then
+		c.icon:Hide(); c.iconBorder:Hide()
+		c.ciBg:ClearAllPoints()
+		c.ciBg:SetPoint("LEFT", row, "LEFT", indentX + 11, 0)
+		local tab = ci.tabard
+		local function color(t) return CreateColor and CreateColor(t[1], t[2], t[3], 1) end
+		local data = tab and color(tab.bg) and { backgroundColor = color(tab.bg), borderColor = color(tab.border or { 0.2, 0.2, 0.2 }),
+			emblemColor = color(tab.emblem), emblemFileID = tab.file, emblemStyle = tab.style } or nil
+		c.ciEmblem:SetSize(40, 46)
+		local ok = data and SetLargeGuildTabardTextures and pcall(SetLargeGuildTabardTextures, nil, c.ciEmblem, c.ciBg, c.ciBorder, data)
+		if ok then
+			c.ciText:Hide()
+		else
+			-- Sin estandarte conocido: su color y sus iniciales.
+			local col = ci.color or { 0.4, 0.4, 0.4 }
+			c.ciBg:SetVertexColor(col[1], col[2], col[3])
+			c.ciBorder:SetVertexColor(col[1] * 0.45, col[2] * 0.45, col[3] * 0.45)
+			c.ciEmblem:Hide()
+			c.ciText:Show()
+			c.ciText:SetText(ci.initials or "?")
+			c.ciText:SetTextColor(1, 0.95, 0.8)
+		end
+	else
+		c.icon:Show()
+	end
 
 	-- Botones abajo a la derecha (los demás se encadenan a la izquierda del primero).
 	local first = row.buttons[1]
@@ -4149,6 +4464,34 @@ local function layoutCard(row, spec, indentX)
 	c.desc:SetPoint("TOPLEFT", row, "TOPLEFT", left, -38)
 	c.desc:SetWidth(math.max(60, full - 150))
 	c.desc:SetText(spec.desc or "")
+	local duel = spec.duel
+	for _, part in ipairs({ c.duelBg, c.duelFill, c.duelEdge, c.duelL, c.duelR }) do part:SetShown(duel ~= nil) end
+	if duel then
+		c.desc:SetText("")
+		local barW = math.min(330, full - 210)
+		c.duelL:ClearAllPoints()
+		c.duelL:SetPoint("TOPLEFT", row, "TOPLEFT", left, -40)
+		c.duelL:SetWidth(34)
+		c.duelL:SetText(GREEN .. (duel.left or 0) .. R)
+		c.duelBg:ClearAllPoints()
+		c.duelBg:SetPoint("LEFT", c.duelL, "RIGHT", 6, 0)
+		c.duelBg:SetWidth(barW)
+		c.duelBg:SetVertexColor(0.62, 0.12, 0.1, 0.95)
+		local total = (duel.left or 0) + (duel.right or 0)
+		local share = total > 0 and (duel.left or 0) / total or 0.5
+		c.duelFill:ClearAllPoints()
+		c.duelFill:SetPoint("LEFT", c.duelBg, "LEFT")
+		c.duelFill:SetWidth(math.max(1, barW * share))
+		c.duelFill:SetVertexColor(0.25, 0.68, 0.22, 0.95)
+		c.duelFill:SetShown(share > 0)
+		c.duelEdge:ClearAllPoints()
+		c.duelEdge:SetPoint("CENTER", c.duelBg, "LEFT", barW * share, 0)
+		c.duelEdge:SetShown(share > 0 and share < 1)
+		c.duelR:ClearAllPoints()
+		c.duelR:SetPoint("LEFT", c.duelBg, "RIGHT", 6, 0)
+		c.duelR:SetText(RED .. (duel.right or 0) .. R)
+	end
+	c.status:SetFontObject(spec.statusLarge and "GameFontNormalHuge" or "GameFontNormal")
 	c.foot:ClearAllPoints()
 	c.foot:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", left, 13)
 	c.foot:SetWidth(math.max(60, full - (buttonsWidth > 0 and buttonsWidth + 12 or 0)))
@@ -4612,7 +4955,7 @@ local FACTION_MODES = {
 	{ key = "helps", label = L["Auxilio"], short = L["Llamadas"], value = function(s) return s.helps end,
 		tip = L["Llamadas de auxilio de otras hermandades atendidas con al menos una kill."] },
 	{ key = "dungeons", label = L["Mazmorras"], short = L["Completadas"], value = function(s) return s.dungeonClears end,
-		tip = L["Mazmorras completadas con un grupo de hermandad (4 o 5 de la guild)."] },
+		tip = L["Mazmorras completadas con un grupo de hermandad (3 o más de la guild)."] },
 	{ key = "raids", label = L["Bandas"], short = L["Jefes"], value = function(s) return ns.RaidBosses(s.raids) end,
 		detail = function(s) return ns.RaidProgressText(s.raids) end },
 	{ key = "points", label = L["Logros"], short = L["Puntos"], value = function(s) return s.points end },
@@ -4933,8 +5276,8 @@ local function updateHeader()
 	if frame.goldFrame then
 		for _, edge in ipairs(frame.goldFrame) do edge:SetShown(perks and perks.goldFrame or false) end
 	end
-	subtitle:SetText((guildName and ("<" .. guildName .. ">") or L["Sin hermandad"]) ..
-		(LG:InTestMode() and ("\n" .. GOLD .. L["modo prueba"] .. R) or (title and ("\n" .. GREY .. title .. R) or "")))
+	subtitle:SetText(guildName and ("<" .. guildName .. ">") or L["Sin hermandad"])
+	subtitle.small:SetText(LG:InTestMode() and (GOLD .. L["modo prueba"] .. R) or (title and (GREY .. title .. R) or ""))
 	if goldWatermark then
 		watermark:SetVertexColor(1, 0.82, 0.35)
 		watermark:SetAlpha(WATERMARK_ALPHA * 1.8)
@@ -5115,20 +5458,24 @@ local function create()
 	if frame.EnableKeyboard and frame.SetPropagateKeyboardInput then
 		frame:EnableKeyboard(true)
 		frame:SetPropagateKeyboardInput(true)
+		-- Solo se toca el paso de teclas al pulsar Escape (fuera de combate): es una función
+		-- protegida, y llamarla con cada tecla hacía saltar «acción bloqueada» si el combate
+		-- empezaba justo entonces. Las demás teclas pasan siempre (queda en true).
 		frame:SetScript("OnKeyDown", function(self, key)
-			if InCombatLockdown() then return end
-			if key == "ESCAPE" then
-				self:SetPropagateKeyboardInput(false)
-				self:Hide()
-			else
-				self:SetPropagateKeyboardInput(true)
-			end
+			if key ~= "ESCAPE" or InCombatLockdown() then return end
+			self:SetPropagateKeyboardInput(false)
+			self:Hide()
+			C_Timer.After(0, function()
+				if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
+			end)
 		end)
-		-- Al abrirse vuelve a dejar pasar las teclas (al cerrarse no: Escape se lo comería el juego).
 		frame:HookScript("OnShow", function(self)
 			if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
 		end)
 	end
+	-- La X oculta la ventana directamente: la de la plantilla pasa por el gestor de ventanas del
+	-- juego, que en combate está protegido y no hacía nada (había que cerrar desde el minimapa).
+	ns.FixCloseButton(frame)
 
 	-- Título y retrato con el emblema (como la ventana de Desafíos).
 	if frame.SetTitle then
@@ -5138,13 +5485,22 @@ local function create()
 		title:SetPoint("TOP", 0, -5)
 		title:SetText(ns.ADDON_TITLE)
 	end
-	if frame.SetPortraitToAsset then pcall(frame.SetPortraitToAsset, frame, ns.MEDIA .. "emblem_small") end
+	-- Emblema con fondo negro: el retrato lo recorta redondo.
+	if frame.SetPortraitToAsset then pcall(frame.SetPortraitToAsset, frame, ns.MEDIA .. "emblem_portrait") end
 
 	-- Cabecera: hermandad, escudo de puntos de hermandad, barra de rango e insignias.
 	subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	subtitle:SetPoint("TOPLEFT", 70, -32)
 	subtitle:SetWidth(NAV_W - 10)
 	subtitle:SetJustifyH("LEFT")
+	subtitle:SetWordWrap(false)
+	-- Debajo, en pequeño y en una línea: el título de la hermandad (o «modo prueba»). En la misma
+	-- letra grande ocupaba dos líneas y se montaba sobre las pestañas.
+	subtitle.small = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	subtitle.small:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -3)
+	subtitle.small:SetWidth(NAV_W - 10)
+	subtitle.small:SetJustifyH("LEFT")
+	subtitle.small:SetWordWrap(false)
 
 	achButton = CreateFrame("Button", nil, frame)
 	achButton:SetSize(46, 46)

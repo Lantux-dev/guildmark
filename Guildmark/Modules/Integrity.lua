@@ -355,6 +355,7 @@ function Integrity:InspectSomeone()
 			and CanInspect(unit) and CheckInteractDistance(unit, 1) then
 			lastInspect[name] = now
 			self.inspecting = { name = name, at = now }
+			if ns.MarkApiCall then ns.MarkApiCall("NotifyInspect") end
 			pcall(NotifyInspect, unit)
 			if RequestInspectHonorData then pcall(RequestInspectHonorData) end
 			-- Se deja de escuchar a los 10 s (llegan INSPECT_READY y, si hay, INSPECT_HONOR_UPDATE).

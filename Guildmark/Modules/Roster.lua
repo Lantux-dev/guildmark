@@ -23,8 +23,25 @@ function Roster:OnEnable()
 	self:ScheduleRepeatingTimer("Request", 60)
 end
 
+-- El servidor limita GuildRoster: los cambios de grupo (al aceptar misiones, al entrar y salir
+-- gente) llegan a ráfagas y cada uno la pedía, y el juego contestaba «demasiado rápido».
+local ROSTER_EVERY = 15
+local lastRoster = -math.huge
 function Roster:Request()
 	if IsInGuild() and not LG:InTestMode() then
+		local now = GetTime()
+		if now - lastRoster < ROSTER_EVERY then
+			-- Una sola petición pendiente para cuando se pueda (si no, se perdería el cambio).
+			if not self.rosterTimer then
+				self.rosterTimer = self:ScheduleTimer(function()
+					self.rosterTimer = nil
+					self:Request()
+				end, ROSTER_EVERY - (now - lastRoster))
+			end
+			return
+		end
+		lastRoster = now
+		if ns.MarkApiCall then ns.MarkApiCall("GuildRoster") end
 		if requestRoster then requestRoster() end
 	else
 		self:Update()

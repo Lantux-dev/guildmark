@@ -35,6 +35,7 @@ end
 
 local function create()
 	local f = CreateFrame("Frame", "LantuxGuildAuctionStart", UIParent, "BasicFrameTemplateWithInset")
+	ns.FixCloseButton(f)
 	f:SetSize(380, 200)
 	f:SetPoint("CENTER", 0, 80)
 	f:SetFrameStrata("DIALOG")

@@ -161,6 +161,7 @@ end
 
 local function create()
 	dialog = CreateFrame("Frame", "LantuxGuildInputDialog", UIParent, "BasicFrameTemplateWithInset")
+	ns.FixCloseButton(dialog)
 	dialog:SetFrameStrata("DIALOG")
 	dialog:SetPoint("CENTER", 0, 100)
 	dialog:EnableMouse(true)

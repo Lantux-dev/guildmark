@@ -211,7 +211,7 @@ function ns.ActivitySummary()
 		end
 	end
 	for _, k in pairs(g.kills) do
-		if k.t >= dayStart and not ns.IsVoided(g, k.id) then
+		if k.t >= dayStart and not ns.IsVoided(g, k.id) and not ns.IsDuplicateKill(g, k.id) then
 			if k.kind == "kill" then s.kills = s.kills + 1 else s.deaths = s.deaths + 1 end
 		end
 	end

@@ -42,11 +42,28 @@ local function periodsOf(name)
 end
 
 -- ¿Tenía el botín de guerra activado en el momento t?
-function ns.InWager(name, t)
-	for _, p in ipairs(periodsOf(name)) do
+local function inPeriods(periods, t)
+	for _, p in ipairs(periods) do
 		if type(p) == "table" and type(p[1]) == "number" and t >= p[1] and (type(p[2]) ~= "number" or t < p[2]) then return true end
 	end
 	return false
+end
+function ns.InWager(name, t)
+	return inPeriods(periodsOf(name), t)
+end
+
+-- Lo mismo para muchas consultas seguidas (el libro de puntos, una o dos por baja): busca los
+-- periodos de cada jugador una sola vez. Rendimiento: InWager suelto era el 20 % del libro.
+function ns.WagerChecker()
+	local byName = {}
+	return function(name, t)
+		local periods = byName[name]
+		if not periods then
+			periods = periodsOf(name)
+			byName[name] = periods
+		end
+		return next(periods) ~= nil and inPeriods(periods, t)
+	end
 end
 
 -- Estado propio: activo, desde cuándo y si ya se puede desactivar.

@@ -45,6 +45,7 @@ end
 
 local function create()
 	dialog = CreateFrame("Frame", "LantuxGuildEventDialog", UIParent, "BasicFrameTemplateWithInset")
+	ns.FixCloseButton(dialog)
 	dialog:SetSize(400, 300)
 	dialog:SetPoint("CENTER", 0, 100)
 	dialog:SetFrameStrata("DIALOG")

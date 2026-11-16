@@ -44,6 +44,7 @@ function Hunt:OnEnable()
 	-- Golpe de gracia (tuyo o de tu grupo): llega aunque el registro de combate esté prohibido.
 	pcall(ns.RegisterEvent, self, "PARTY_KILL", function(_, a1, a2) self:OnPartyKill(a1, a2) end)
 	if ns.StartKillSummaries then ns.StartKillSummaries() end
+	if ns.StartDigestRounds then ns.StartDigestRounds() end
 	self.lastKB = self:KillingBlows()
 	self:ScheduleRepeatingTimer("ShareCache", CACHE_SHARE_EVERY)
 	-- En Forever la muerte con honor llega como «Has recibido N p. de honor.», sin la víctima:
@@ -235,9 +236,98 @@ function Hunt:CacheUnit(unit)
 	if not old or old.g ~= entry.g or now - (old.t or 0) > CACHE_REFRESH then
 		newCache[guid] = entry
 	end
+	if guildName then ns.CaptureTabard(g, unit, guildName) end
+end
+
+-- Estandarte de la hermandad de un jugador que vemos (JcJ > Objetivos lo pinta de fondo).
+-- Uno por hermandad, renovado como mucho cada semana; se comparte con la hermandad (TABARD).
+local TABARD_REFRESH = 7 * 86400
+local newTabards = {}
+-- Las placas y el ratón no dan estandarte (solo el objetivo): no preguntar al juego por la misma
+-- hermandad más de una vez cada TABARD_RETRY segundos (CacheUnit corre con cada placa).
+local TABARD_RETRY = 60
+local tabardTried = {}
+local function rgb(c)
+	if type(c) ~= "table" or not c.GetRGB then return nil end
+	local r, gg, b = c:GetRGB()
+	return { math.floor(r * 1000 + 0.5) / 1000, math.floor(gg * 1000 + 0.5) / 1000, math.floor(b * 1000 + 0.5) / 1000 }
+end
+function ns.CaptureTabard(g, unit, guildName)
+	if not (C_GuildInfo and C_GuildInfo.GetGuildTabardInfo) then return end
+	g.guildTabards = g.guildTabards or {}
+	local old = g.guildTabards[guildName]
+	if old and ns.Now() - (old.t or 0) < TABARD_REFRESH then return end
+	local now = GetTime and GetTime() or 0
+	if not UnitIsUnit or not UnitIsUnit(unit, "target") then
+		if tabardTried[guildName] and now - tabardTried[guildName] < TABARD_RETRY then return end
+	end
+	tabardTried[guildName] = now
+	if ns.MarkApiCall then ns.MarkApiCall("GetGuildTabardInfo") end
+	local ok, info = pcall(C_GuildInfo.GetGuildTabardInfo, unit)
+	if not ok or type(info) ~= "table" or not info.emblemFileID or secret(info.emblemFileID) then return end
+	local rec = { bg = rgb(info.backgroundColor), border = rgb(info.borderColor), emblem = rgb(info.emblemColor),
+		file = info.emblemFileID, style = info.emblemStyle, t = ns.Now() }
+	if not rec.bg or not rec.emblem then return end
+	g.guildTabards[guildName] = rec
+	newTabards[guildName] = rec
+end
+
+-- Lo que llega de otro miembro: limpio y solo si es más reciente.
+function ns.MergeTabards(g, batch)
+	if type(batch) ~= "table" then return false end
+	g.guildTabards = g.guildTabards or {}
+	local changed = false
+	local function color(c)
+		if type(c) ~= "table" then return nil end
+		local out = {}
+		for i = 1, 3 do
+			local v = tonumber(c[i])
+			if not v or v ~= v then return nil end
+			out[i] = math.max(0, math.min(1, v))
+		end
+		return out
+	end
+	for guild, t in pairs(batch) do
+		if type(guild) == "string" and #guild <= 48 and type(t) == "table" and tonumber(t.file) and tonumber(t.t) then
+			local old = g.guildTabards[guild]
+			if not old or (old.t or 0) < t.t then
+				local bg, emblem = color(t.bg), color(t.emblem)
+				if bg and emblem then
+					g.guildTabards[guild] = { bg = bg, border = color(t.border) or { 0.2, 0.2, 0.2 }, emblem = emblem,
+						file = tonumber(t.file), style = tonumber(t.style), t = tonumber(t.t) }
+					changed = true
+				end
+			end
+		end
+	end
+	return changed
+end
+
+ns.handlers.TABARD = function(sender, batch)
+	local g = LG:GuildData()
+	if g and ns.MergeTabards(g, batch) then LG:DataChanged(true) end
+end
+
+-- Diagnóstico: el estandarte de tu objetivo y cuántos hay guardados. Uso: /gmk dump LantuxGuild_Tabard()
+function LantuxGuild_Tabard()
+	local out = { target = UnitExists("target") and (GetGuildInfo("target")) or nil }
+	if C_GuildInfo and C_GuildInfo.GetGuildTabardInfo then
+		local ok, info = pcall(C_GuildInfo.GetGuildTabardInfo, "target")
+		out.ok, out.hasInfo = ok, type(info) == "table"
+		if ok and type(info) == "table" then out.file, out.style, out.bg = info.emblemFileID, info.emblemStyle, rgb(info.backgroundColor) end
+	end
+	local g = LG:GuildData()
+	local n = 0
+	for _ in pairs(g and g.guildTabards or {}) do n = n + 1 end
+	out.stored = n
+	return out
 end
 
 function Hunt:ShareCache()
+	if next(newTabards) then
+		LG:Send("TABARD", newTabards, "GUILD", nil, "BULK")
+		newTabards = {}
+	end
 	if not next(newCache) then return end
 	local batch, n = {}, 0
 	for guid, entry in pairs(newCache) do
@@ -464,11 +554,19 @@ function Hunt:CaptureRecap()
 	if killerGUID then self:RecordDeath(killerGUID, assists) end
 end
 
+-- PLAYER_DEAD salta a veces dos veces por muerte en Forever: la primera usa el último atacante
+-- y la segunda caía al informe de muerte, que daba la misma muerte otra vez (1-8 s después). La
+-- misma víctima a manos del mismo asesino en DEATH_DUP_WINDOW es la misma muerte.
+local DEATH_DUP_WINDOW = 30
+ns.DEATH_DUP_WINDOW = DEATH_DUP_WINDOW
 function Hunt:RecordDeath(killerGUID, assistGUIDs)
 	local g = LG:GuildData()
 	if not g or not LG:HasConsent() then return end
 
 	local now = ns.Now()
+	local last = self.lastDeath
+	if last and last.killer == killerGUID and now - last.t <= DEATH_DUP_WINDOW then return end
+	self.lastDeath = { killer = killerGUID, t = now }
 	local k = describe(g, killerGUID)
 	local me = ns.PlayerFullName()
 	-- Otros jugadores que te pegaron antes de morir, con su hermandad si se conoce.
@@ -512,6 +610,7 @@ end
 
 -- Avisos en el chat, para kills propias y para las que llegan de otros miembros.
 function ns.OnKillReceived(rec)
+	if rec.kind == "death" and ns.IsDuplicateKill(LG:GuildData(), rec.id) then return end
 	if ns.BountyNotify then ns.BountyNotify(rec) end
 	if rec.kind == "death" then
 		if rec.bg then return end
@@ -636,9 +735,10 @@ function ns.HuntStats(days)
 	local byKiller = {} -- [hermandad][asesino] = muertes
 	if not g then return stats end
 	local since = ns.Now() - days * 86400
+	local dups = ns.DuplicateKills(g)
 	for _, k in pairs(g.kills) do
 		-- Las kills anuladas por un oficial no cuentan ni aparecen; las de campos de batalla, tampoco.
-		if not ns.IsVoided(g, k.id) and not k.bg then
+		if not ns.IsVoided(g, k.id) and not k.bg and not (k.kind == "death" and dups[k.id]) then
 			if k.t >= since then
 				local guild = k.guild or ns.NO_GUILD
 				if k.kind == "death" then
@@ -677,12 +777,162 @@ end
 ns.STREAK_TIERS = { 3, 5, 10, 20 }
 
 -- [miembro] = { current, since, best, bestAt, reached = { [n] = cuándo llegó a n } }
+-- Una muerte, una baja para la hermandad (1.2.1). Cada miembro con crédito de honor apunta su
+-- propia baja: si cuatro matan a uno, hay cuatro registros. En los rankings personales cuentan
+-- todos (cada uno se ganó su honor); en los TOTALES de la hermandad (logros, temporada de la
+-- facción, actividad del día, tribus) solo el primero. Mismo criterio que la gaceta: misma
+-- víctima, otro informante y menos de DUP_WINDOW segundos (medido: el 97 % llega en < 5 s y nadie
+-- mata dos veces a la misma víctima en menos de un minuto).
+local DUP_WINDOW = 15
+local dupCache = { n = -1 }
+
+-- Rendimiento: IsDuplicateKill se llama una vez por baja dentro de bucles sobre todas las bajas,
+-- así que la caché no puede recorrer g.kills en cada llamada (eso era O(n²) y daba tirones).
+-- Dentro del mismo frame se devuelve tal cual; entre frames basta una huella (cuántas y la más
+-- nueva) salvo que alguien la haya invalidado (DataChanged / MergeKill).
+local killsVersion = 0 -- sube con cada cambio en las bajas (cachés de esta parte)
+function ns.InvalidateDuplicates()
+	dupCache.dirty = true
+	killsVersion = killsVersion + 1
+end
+
+function ns.DuplicateKills(g)
+	g = g or LG:GuildData()
+	if not g then return {} end
+	local frame = GetTime and GetTime() or 0
+	if dupCache.g == g and dupCache.kills == g.kills and dupCache.set and not dupCache.dirty and dupCache.frame == frame then return dupCache.set end
+	local n, newest = 0, 0
+	for _, k in pairs(g.kills) do
+		n = n + 1
+		if (k.t or 0) > newest then newest = k.t end
+	end
+	if dupCache.g == g and dupCache.kills == g.kills and not dupCache.dirty and dupCache.n == n and dupCache.newest == newest then
+		dupCache.frame = frame
+		return dupCache.set
+	end
+	local byVictim = {}
+	for id, k in pairs(g.kills) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
+		local victim = k.kind == "kill" and (k.victim or k.victimName)
+		if victim then
+			byVictim[victim] = byVictim[victim] or {}
+			table.insert(byVictim[victim], { id = id, t = k.t or 0, reporter = k.reporter })
+		end
+	end
+	local set = {}
+	-- Muertes nuestras apuntadas dos veces (ver Hunt:RecordDeath): misma víctima y mismo asesino
+	-- en menos de DEATH_DUP_WINDOW; cuenta la primera.
+	local byDeath = {}
+	for id, k in pairs(g.kills) do
+		if k.kind == "death" and (k.victim or k.victimName) then
+			ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
+			local key = (k.victim or k.victimName) .. "|" .. tostring(k.killer or k.killerName)
+			byDeath[key] = byDeath[key] or {}
+			table.insert(byDeath[key], { id = id, t = k.t or 0 })
+		end
+	end
+	for _, list in pairs(byDeath) do
+		if #list > 1 then
+			table.sort(list, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.id < b.id end)
+			local keptT
+			for _, x in ipairs(list) do
+				if keptT and x.t - keptT <= ns.DEATH_DUP_WINDOW then set[x.id] = true else keptT = x.t end
+			end
+		end
+	end
+	for _, list in pairs(byVictim) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
+		if #list > 1 then
+			table.sort(list, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.id < b.id end)
+			local kept = {} -- muertes que cuentan, con quién las apuntó
+			for _, x in ipairs(list) do
+				local dup = false
+				for _, d in ipairs(kept) do
+					if x.t - d.t <= DUP_WINDOW and not d.reporters[x.reporter or "?"] then
+						dup = true
+						d.reporters[x.reporter or "?"] = true
+						break
+					end
+				end
+				if dup then
+					set[x.id] = true
+				else
+					kept[#kept + 1] = { t = x.t, reporters = { [x.reporter or "?"] = true } }
+				end
+			end
+		end
+	end
+	dupCache = { g = g, kills = g.kills, n = n, newest = newest, set = set, frame = frame }
+	return set
+end
+
+-- ¿Es este registro otra copia de una muerte que ya cuenta para la hermandad?
+function ns.IsDuplicateKill(g, id)
+	return ns.DuplicateKills(g)[id] == true
+end
+
+-- Rachas de cada miembro. Rendimiento: los logros, Cazadores y la gaceta la piden a menudo; se
+-- reutiliza mientras no cambien las bajas (versión + huella, como DuplicateKills). No modificar
+-- lo que devuelve.
+local streakCache = {}
+local function killsFingerprint(g)
+	local n, newest = 0, 0
+	for _, k in pairs(g.kills) do
+		n = n + 1
+		if (k.t or 0) > newest then newest = k.t end
+	end
+	return n, newest
+end
+-- ¿Sigue valiendo una caché sobre las bajas? Misma hermandad, misma tabla, misma versión y,
+-- dentro del mismo frame, sin más; entre frames, además la huella (por si alguien tocó g.kills
+-- sin avisar).
+local function killsCacheValid(c, g)
+	if c.g ~= g or c.kills ~= g.kills or c.version ~= killsVersion then return false end
+	local frame = GetTime and GetTime() or 0
+	if c.frame == frame and not ns.SYNC_DATA_CHANGED then return true end -- (las pruebas tocan g.kills a mano con el reloj parado)
+	local n, newest = killsFingerprint(g)
+	if c.n ~= n or c.newest ~= newest then return false end
+	c.frame = frame
+	return true
+end
+local function killsCacheNew(g, result)
+	local n, newest = killsFingerprint(g)
+	return { g = g, kills = g.kills, version = killsVersion, n = n, newest = newest, frame = GetTime and GetTime() or 0, result = result }
+end
+
+local computeStreaks
 function ns.KillStreaks(g)
 	g = g or LG:GuildData()
+	if not g then return {} end
+	if killsCacheValid(streakCache, g) then return streakCache.result end
+	local result = computeStreaks(g)
+	streakCache = killsCacheNew(g, result)
+	return result
+end
+
+-- Bajas (kind = "kill", fuera de campos de batalla) de cada asesino: [killerName] = { registros }.
+-- Para Auxilio, que antes recorría todas las bajas por cada ayuda. No modificar lo que devuelve.
+local byKillerCache = {}
+function ns.KillsByKiller(g)
+	if killsCacheValid(byKillerCache, g) then return byKillerCache.result end
+	local by = {}
+	for _, k in pairs(g.kills) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
+		if k.kind == "kill" and not k.bg and k.killerName then
+			local list = by[k.killerName]
+			if not list then list = {}; by[k.killerName] = list end
+			list[#list + 1] = k
+		end
+	end
+	byKillerCache = killsCacheNew(g, by)
+	return by
+end
+
+computeStreaks = function(g)
 	local byMember = {}
-	if not g then return byMember end
 	local lists = {}
 	for _, k in pairs(g.kills) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
 		local who = k.reporter
 		if who and not k.bg and not ns.IsVoided(g, k.id)
 			and ((k.kind == "kill" and k.honorable and k.killerName == who) or (k.kind == "death" and k.victimName == who)) then
@@ -691,7 +941,8 @@ function ns.KillStreaks(g)
 		end
 	end
 	for who, list in pairs(lists) do
-		table.sort(list, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.id < b.id end)
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
+		ns.SortByTime(list, function(a, b) return a.id < b.id end)
 		local s = { current = 0, best = 0, reached = {} }
 		for _, k in ipairs(list) do
 			if k.kind == "kill" then
@@ -739,7 +990,7 @@ function ns.HunterBoard(days)
 					v.n = v.n + 1
 					e.victims[k.victimName] = v
 				end
-			elseif k.kind == "death" and k.victimName then
+			elseif k.kind == "death" and k.victimName and not ns.IsDuplicateKill(g, k.id) then
 				local e = entry(k.victimName)
 				e.deaths = e.deaths + 1
 			end

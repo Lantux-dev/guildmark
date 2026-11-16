@@ -139,7 +139,7 @@ local function recentDeaths(g, enemy, zone, now, map)
 	local n = 0
 	for _, k in pairs(g.kills) do
 		if k.kind == "death" and not k.bg and (k.guild or GUILDLESS) == enemy and sameZone(k, map, zone) and now - k.t <= TRIGGER_WINDOW and now >= k.t
-			and not ns.IsVoided(g, k.id) then
+			and not ns.IsVoided(g, k.id) and not ns.IsDuplicateKill(g, k.id) then
 			n = n + 1
 		end
 	end
@@ -546,7 +546,9 @@ local AID_KILL_CAP = 5
 ns.AID_KILL_CAP = AID_KILL_CAP
 function ns.AidHelpKills(g, h)
 	local list = {}
-	for _, k in pairs(g.kills) do
+	-- Solo las bajas de ese miembro (índice de Hunt.lua), no todas las de la hermandad.
+	local mine = ns.KillsByKiller and (ns.KillsByKiller(g)[h.member] or {}) or g.kills
+	for _, k in pairs(mine) do
 		if k.kind == "kill" and not k.bg and k.killerName == h.member and k.t >= (h.callT or h.t) and k.t <= (h.ends or h.t + CALL_LENGTH)
 			and sameZone(k, h.map, h.zone) and not ns.IsVoided(g, k.id) then
 			list[#list + 1] = k

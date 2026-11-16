@@ -114,28 +114,65 @@ local function targetTimeline(g)
 	for guild, t in pairs(g.targets) do
 		if t.active then manual[guild] = "manual" end
 	end
+	-- Las TARGET_AUTO_COUNT primeras (más muertes; a igualdad, por nombre), llevadas al vuelo:
+	-- con datos reales hay cientos de hermandades en la ventana y esto corre una vez por baja.
+	-- Una que sube solo puede entrar quitando a la peor del grupo; una de dentro que baja obliga a
+	-- repasarlas todas (otra de fuera podría adelantarla); una de fuera que baja no cambia nada.
 	local counts, nextIn, nextOut = {}, 1, 1
-	local current, dirty = nil, true
+	local top, inTop, needFull, changed = {}, {}, false, true
+	local current
+	local function better(ga, gb)
+		local na, nb = counts[ga] or 0, counts[gb] or 0
+		if na ~= nb then return na > nb end
+		return ga < gb
+	end
+	local function up(guild)
+		counts[guild] = (counts[guild] or 0) + 1
+		if inTop[guild] or needFull then return end
+		if #top < TARGET_AUTO_COUNT then
+			top[#top + 1], inTop[guild], changed = guild, true, true
+			return
+		end
+		local worst = 1
+		for i = 2, #top do if better(top[worst], top[i]) then worst = i end end
+		if better(guild, top[worst]) then
+			inTop[top[worst]] = nil
+			top[worst], inTop[guild], changed = guild, true, true
+		end
+	end
+	local function down(guild)
+		counts[guild] = counts[guild] - 1
+		if counts[guild] == 0 then counts[guild] = nil end
+		if inTop[guild] then needFull = true end
+	end
+	local function full()
+		local list = {}
+		for guild in pairs(counts) do
+			local pos = #list + 1
+			while pos > 1 and better(guild, list[pos - 1]) do pos = pos - 1 end
+			if pos <= TARGET_AUTO_COUNT then
+				table.insert(list, pos, guild)
+				if #list > TARGET_AUTO_COUNT then list[#list] = nil end
+			end
+		end
+		top, inTop, needFull, changed = list, {}, false, true
+		for _, guild in ipairs(list) do inTop[guild] = true end
+	end
 	return function(at)
 		while deaths[nextIn] and deaths[nextIn].t <= at do
-			local guild = deaths[nextIn].guild
-			counts[guild] = (counts[guild] or 0) + 1
-			nextIn, dirty = nextIn + 1, true
+			up(deaths[nextIn].guild)
+			nextIn = nextIn + 1
 		end
 		while nextOut < nextIn and at - deaths[nextOut].t > TARGET_WINDOW do
-			local guild = deaths[nextOut].guild
-			counts[guild] = counts[guild] - 1
-			if counts[guild] == 0 then counts[guild] = nil end
-			nextOut, dirty = nextOut + 1, true
+			down(deaths[nextOut].guild)
+			nextOut = nextOut + 1
 		end
-		if dirty then
-			local list = {}
-			for guild, n in pairs(counts) do list[#list + 1] = { guild = guild, n = n } end
-			table.sort(list, function(a, b) if a.n ~= b.n then return a.n > b.n end return a.guild < b.guild end)
+		if needFull then full() end
+		if changed or not current then
 			current = {}
-			for i = 1, math.min(TARGET_AUTO_COUNT, #list) do current[list[i].guild] = "auto" end
+			for _, guild in ipairs(top) do current[guild] = "auto" end
 			for guild, v in pairs(manual) do current[guild] = v end
-			dirty = false
+			changed = false
 		end
 		return current
 	end
@@ -158,6 +195,7 @@ end
 -- Reúne todos los hechos que dan o quitan puntos, sin aplicar topes ni decaimiento.
 local function collectEntries(g)
 	local entries = {}
+	local inWager = ns.WagerChecker and ns.WagerChecker()
 	-- boost: clave de un proyecto del cofre (Chest.lua) que, activo en t, multiplica los puntos y el tope.
 	local function add(t, member, cat, pts, reason, factor, boost)
 		factor = factor or 1
@@ -212,12 +250,14 @@ local function collectEntries(g)
 	-- El resto de kills, solo si dieron honor: matar a alguien de nivel bajo no da nada.
 	local kills = {}
 	for _, k in pairs(g.kills) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
 		if k.kind == "kill" and k.honorable and k.killerName and not k.bg and not ns.IsVoided(g, k.id) then kills[#kills + 1] = k end
 	end
-	table.sort(kills, function(a, b) return a.t < b.t end)
+	ns.SortByTime(kills)
 	local sameVictim = {}
 	local targetsAt = targetTimeline(g)
 	for _, k in ipairs(kills) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
 		local hunt = k.revenge or (k.guild and targetsAt(k.t)[k.guild])
 		if hunt or (tonumber(k.honor) or 0) > 0 then
 			local key = ("%s|%s|%d"):format(k.killerName, k.victim or k.victimName or "?", dayIndex(k.t))
@@ -225,7 +265,7 @@ local function collectEntries(g)
 			local factor = SAME_VICTIM_FACTOR[sameVictim[key]] or 0
 			if factor > 0 then
 				-- Botín de guerra (Bounty.lua): x1,5 cazando, también en el tope.
-				local wager = ns.InWager and ns.InWager(k.killerName, k.t) and ns.WAGER.bonus or nil
+				local wager = inWager and inWager(k.killerName, k.t) and ns.WAGER.bonus or nil
 				local suffix = wager and ("  " .. L["(botín de guerra)"]) or ""
 				local pts, label = POINTS.honorKill, (L["Baja con honor: %s"]):format(ns.ShortName(k.victimName) or "?")
 				if hunt then pts, label = POINTS.huntKill, (k.guild and (L["Caza: %s <%s>"]):format(ns.ShortName(k.victimName) or "?", k.guild) or (L["Caza: %s"]):format(ns.ShortName(k.victimName) or "?")) end
@@ -306,11 +346,12 @@ local function collectEntries(g)
 	-- Botín de guerra y cabezas con precio (Bounty.lua): pérdidas al morir, cobros al
 	-- matar y recompensas puestas a mano. Las cantidades dependen del saldo de ese
 	-- momento, así que se resuelven al recorrer el libro (ns.Scores).
-	if ns.InWager then
+	if inWager then
 		local gap = ns.WAGER.levelGap
 		for _, k in pairs(g.kills) do
+			ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
 			if not k.bg and not ns.IsVoided(g, k.id) then
-				if k.kind == "death" and k.victimName and (k.killer or k.killerName) and ns.InWager(k.victimName, k.t) then
+				if k.kind == "death" and k.victimName and (k.killer or k.killerName) and inWager(k.victimName, k.t) then
 					local killerLevel = tonumber(k.level)
 					local mine = g.members[k.victimName] or ns.roster[k.victimName]
 					local myLevel = mine and tonumber(mine.level)
@@ -374,7 +415,7 @@ local function collectEntries(g)
 	for id, p in pairs(g.purchases or {}) do
 		local item = ns.ShopItem and ns.ShopItem(p.item)
 		if item and p.item ~= "tribeCreate" and not ns.IsVoided(g, id) and ns.PurchaseCharged(g, p) then
-			entries[#entries + 1] = { t = p.t, member = p.member, special = "buy", rep = 0, merits = 0, amount = item.price,
+			entries[#entries + 1] = { id = id, t = p.t, member = p.member, special = "buy", rep = 0, merits = 0, amount = item.price,
 				item = p.item, own = item.kind ~= "fee", reason = (L["Tienda: %s"]):format(item.label) }
 		end
 	end
@@ -413,27 +454,36 @@ local function collectEntries(g)
 		return ("%s|%s|%s|%s|%d|%d"):format(e.member or "", e.special or e.cat or "", tostring(e.reason or ""),
 			tostring(e.donation or e.bounty or e.death or e.kill or e.item or ""), e.merits or 0, e.amount or 0)
 	end
-	for _, e in ipairs(entries) do e.sortKey = key(e) end
-	table.sort(entries, function(a, b)
-		if a.t ~= b.t then return a.t < b.t end
-		return a.sortKey < b.sortKey
+	-- La clave solo hace falta en los empates: se calcula entonces (antes, para todos: el 15 % del libro).
+	ns.SortByTime(entries, function(a, b)
+		local ka, kb = a.sortKey, b.sortKey
+		if not ka then ka = key(a); a.sortKey = ka end
+		if not kb then kb = key(b); b.sortKey = kb end
+		return ka < kb
 	end)
 	return entries
 end
 
 local cache
+local lastScores -- el último cálculo, aunque esté invalidado (ns.Scores(true))
 local donated = {} -- [idDonación] = insignias que de verdad se descontaron
 local pots = {}    -- precios por cabezas (Bounty.lua), resueltos al recorrer el libro
 local owned = {}   -- ["Nombre|clave"] = cuándo lo compró (Shop.lua)
+local paidFees = {} -- [idCompra] = true si la tasa se cobró de verdad (había insignias)
 local decayed = {} -- [semana] = insignias que bajaron esa semana (van al cofre, Chest.lua)
 
 -- Aplica topes y decaimiento en orden cronológico y devuelve, por miembro:
 -- { rep, merits, recent = { últimos movimientos }, capsUsed = { [cat] = insignias en el periodo actual } }
-function ns.Scores()
+-- stale = true: vale el último cálculo aunque haya cambiado algo (lo cosmético, como las insignias
+-- sobre el marco: recalcular el libro entero cuesta ~30 ms y daba tirones al cambiar de objetivo).
+function ns.Scores(stale)
 	if cache then return cache end
+	if stale and lastScores then return lastScores end
+	-- Se va a calcular aquí y ahora: una tarea de fondo a medias del libro usaría las mismas tablas.
+	if ns.CancelBackground and not ns.InBackground() then ns.CancelBackground() end
 	local g = LG:GuildData()
 	local scores = {}
-	donated, pots, owned, decayed = {}, {}, {}, {}
+	donated, pots, owned, decayed, paidFees = {}, {}, {}, {}, {}
 	if not g then return scores end
 
 	local function score(member)
@@ -484,6 +534,7 @@ function ns.Scores()
 			s.merits = s.merits - e.amount
 			note(s, e.t, -e.amount, e.reason)
 			if e.own then owned[e.member .. "|" .. e.item] = e.t end
+			if e.id then paidFees[e.id] = true end
 		elseif e.special == "claim" then
 			for _, pot in ipairs(pots) do
 				if not pot.claimedAt and e.t > pot.t and e.t <= pot.t + BOUNTY_TTL and ns.BountyMatches(pot, e.guid, e.name) then
@@ -509,6 +560,7 @@ function ns.Scores()
 	ns.ledgerSize = #all
 	t0 = ns.PerfStart and ns.PerfStart()
 	for _, e in ipairs(all) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
 		local s = score(e.member)
 		decayTo(s, weekIndex(e.t))
 		if e.special then
@@ -561,7 +613,7 @@ function ns.Scores()
 		s.periods = nil
 	end
 	if t0 then ns.PerfStop("puntos: sumar", t0) end
-	cache = scores
+	cache, lastScores = scores, scores
 	return scores
 end
 
@@ -573,6 +625,12 @@ function ns.DecayedToChest()
 	local list = {}
 	for week, amount in pairs(decayed) do list[#list + 1] = { t = WEEK_ANCHOR + week * WEEK, amount = amount } end
 	return list
+end
+
+-- ¿Se cobró esta compra? (una tasa sin insignias suficientes en ese momento no cuenta)
+function ns.FeePaid(id)
+	ns.Scores()
+	return paidFees[id] == true
 end
 
 function ns.ShopOwned()
@@ -601,10 +659,10 @@ function ns.ApplyRankNames()
 end
 
 -- Rango que corresponde por reputación y antigüedad, y el siguiente.
-function ns.MeritRank(name)
+function ns.MeritRank(name, stale)
 	ns.ApplyRankNames()
 	local g = LG:GuildData()
-	local s = ns.Scores()[name] or { rep = 0 }
+	local s = ns.Scores(stale)[name] or { rep = 0 }
 	local m = g and g.members[name]
 	local weeks = m and m.joined and math.floor((ns.Now() - m.joined) / WEEK) or 0
 	-- En modo prueba no se exige antigüedad, para poder probar los ascensos.

@@ -174,6 +174,7 @@ function Vault:NextTab()
 	local n = table.remove(self.queue or {}, 1)
 	if not n then return self:FinishScan() end
 	self.waiting = n
+	if ns.MarkApiCall then ns.MarkApiCall("QueryGuildBankTab") end
 	if QueryGuildBankTab then pcall(QueryGuildBankTab, n) end
 	self.timeout = self:ScheduleTimer(function() self:ReadTab(n, true) end, TAB_TIMEOUT)
 end

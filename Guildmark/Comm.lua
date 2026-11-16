@@ -40,6 +40,11 @@ ns.handlers = {}
 -- Los oficiales lo apagan en Ajustes (ajuste de hermandad "guildChat").
 function ns.GuildAnnounce(text)
 	if not LG:HasConsent() or not text or not (ns.GuildSetting and ns.GuildSetting("guildChat", true)) then return end
+	-- Sin conocer todavía los ajustes de la hermandad (personaje recién llegado, sincronización
+	-- pendiente) no se escribe: podría tener desactivados los avisos y aquí saldrían por defecto.
+	-- Vale si ya hay ajustes guardados, si ha llegado la sincronización o tras 3 min sin respuesta.
+	local g = LG:GuildData()
+	if not (g and g.settings and next(g.settings)) and not ns.SyncSettled() then return end
 	local channel = "GUILD"
 	if LG:InTestMode() then
 		channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY") or nil
@@ -50,6 +55,7 @@ function ns.GuildAnnounce(text)
 	-- El servidor no admite texturas en el chat; los enlaces de objetos sí.
 	text = ("[Guildmark] " .. text):gsub("|T.-|t", "")
 	local send = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
+	if ns.MarkApiCall then ns.MarkApiCall("SendChatMessage") end
 	if send then pcall(send, text:sub(1, 255), channel) end
 end
 
@@ -205,6 +211,7 @@ end
 function ns.MergeKill(g, rec)
 	if type(rec.id) ~= "string" or g.kills[rec.id] then return false end
 	g.kills[rec.id] = rec
+	if ns.InvalidateDuplicates then ns.InvalidateDuplicates() end
 	return true
 end
 
@@ -375,6 +382,13 @@ ns.handlers.SYNC = withGuild(function(g, sender, data, distribution)
 	for _, rec in pairs(data.bounties or {}) do
 		if type(rec) == "table" then changed = ns.MergeBounty(g, rec) or changed end
 	end
+	if type(data.guildTabards) == "table" and ns.MergeTabards then changed = ns.MergeTabards(g, data.guildTabards) or changed end
+	for _, rec in pairs(data.runStats or {}) do
+		if type(rec) == "table" and ns.MergeRunStats then changed = ns.MergeRunStats(g, rec) or changed end
+	end
+	for _, rec in pairs(data.attempts or {}) do
+		if type(rec) == "table" and ns.MergeAttempt then changed = ns.MergeAttempt(g, rec) or changed end
+	end
 	for _, rec in pairs(data.purchases or {}) do
 		if type(rec) == "table" then changed = ns.MergePurchase(g, rec) or changed end
 	end
@@ -453,6 +467,8 @@ ns.handlers.SYNC = withGuild(function(g, sender, data, distribution)
 	if type(data._parts) ~= "number" or data._part == data._parts then
 		LG.lastSync = { from = sender, t = ns.Now() }
 	end
+	ns.SyncLog("sync", { from = sender, part = data._part, parts = data._parts,
+		kills = data.kills and #data.kills or 0, runs = data.runs and #data.runs or 0 })
 	-- Lo que tengo yo y a quien me contesta le falta, se lo devuelvo.
 	if type(data.killDigest) == "table" or type(data.runDigest) == "table" then
 		local kills = type(data.killDigest) == "table" and ns.SyncMissing(g.kills, data.killDigest, nil, SYNC_MAX_KILLS) or {}
@@ -567,6 +583,7 @@ ns.handlers.KREQ = function(sender, data, distribution, rawSender)
 	LG:SendParts("FILL", { kills = list, runs = {} }, "WHISPER", rawSender or sender, "BULK")
 end
 
+
 ---------------------------------------------------------------------------
 -- Sincronización al entrar
 ---------------------------------------------------------------------------
@@ -642,6 +659,137 @@ local function missingFor(tbl, theirs, newestBy, max)
 end
 ns.SyncMissing = missingFor
 
+---------------------------------------------------------------------------
+-- Repaso completo entre conectados (1.2.1): anti-entropía por cubos
+--
+-- Al entrar responde UN miembro, y si a él le faltaba algo, a ti también. KSUM solo repasa
+-- lo propio de hoy y ayer. Por eso, cada DSUM_EVERY, un miembro anuncia su resumen entero
+-- (informante × día, los DIGEST_DAYS días de la sincronización; bajas y mazmorras):
+--   · quien tenga menos en algún cubo se lo pide por susurro (DREQ) y recibe FILL;
+--   · quien tenga más en algún cubo anuncia su propio resumen poco después, para que los
+--     demás se lo pidan a él.
+-- Los registros solo se suman (nunca se borran ni se pisan), así que todos los conectados
+-- acaban con lo mismo sin importar quién respondió al entrar.
+---------------------------------------------------------------------------
+
+local DSUM_EVERY = 20 * 60    -- un repaso por hermandad cada 20 min (el primero en llegar lo hace)
+local DSUM_MIN_GAP = 5 * 60   -- nadie anuncia el suyo más de una vez cada 5 min
+local DREQ_EVERY = 60         -- a cada uno se le responde como mucho una vez por minuto
+local DSUM_MAX = 400          -- registros por respuesta (el resto, en la siguiente vuelta)
+-- Estado del repaso (en una tabla para que las pruebas simulen varios clientes).
+local ds = { heard = -math.huge, sent = -math.huge, answered = {}, soon = nil }
+function ns.SetDigestState(state) ds = state end
+
+-- Cubos { [informante] = { día, … } } en los que el resumen «theirs» tiene más que el mío.
+local function bucketsTheyHaveMore(mine, theirs)
+	local want, n = {}, 0
+	for who, days in pairs(theirs) do
+		if type(who) == "string" and type(days) == "table" then
+			for day, count in pairs(days) do
+				day, count = tonumber(day), tonumber(count)
+				if day and count and count > ((mine[who] and mine[who][day]) or 0) then
+					want[who] = want[who] or {}
+					table.insert(want[who], day)
+					n = n + 1
+				end
+			end
+		end
+	end
+	return want, n
+end
+ns.BucketsTheyHaveMore = bucketsTheyHaveMore
+
+-- ¿Tengo yo más que «theirs» en algún cubo?
+local function iHaveMore(mine, theirs)
+	for who, days in pairs(mine) do
+		local other = type(theirs[who]) == "table" and theirs[who] or {}
+		for day, count in pairs(days) do
+			if count > (tonumber(other[day]) or 0) then return true end
+		end
+	end
+	return false
+end
+
+function ns.SendDigestRound(force)
+	local g = LG:GuildData()
+	if not g or not LG:HasConsent() then return end
+	if not force and (GetTime() - ds.heard < DSUM_EVERY * 0.75) then return end
+	if GetTime() - ds.sent < DSUM_MIN_GAP then return end
+	ds.sent, ds.heard = GetTime(), GetTime()
+	LG:Send("DSUM", { k = digest(g.kills), r = digest(g.runs) }, "GUILD", nil, "BULK")
+	ns.SyncLog("dsum-enviado")
+end
+
+function ns.StartDigestRounds()
+	if LG.dsumRepeating then return end
+	-- Con un margen al azar para que no lo anuncien todos a la vez; el que oye uno, espera.
+	LG.dsumRepeating = LG:ScheduleRepeatingTimer(function()
+		LG:ScheduleTimer(function() ns.SendDigestRound() end, math.random() * 120)
+	end, DSUM_EVERY)
+end
+
+ns.handlers.DSUM = function(sender, data, _, rawSender)
+	local g = LG:GuildData()
+	if not g or type(data) ~= "table" or sender == ns.PlayerFullName() then return end
+	ds.heard = GetTime()
+	local k = type(data.k) == "table" and data.k or {}
+	local r = type(data.r) == "table" and data.r or {}
+	local myK, myR = digest(g.kills), digest(g.runs)
+	local wantK, nK = bucketsTheyHaveMore(myK, k)
+	local wantR, nR = bucketsTheyHaveMore(myR, r)
+	ns.SyncLog("dsum", { from = sender, faltan = nK + nR })
+	if nK + nR > 0 then
+		LG:ScheduleTimer(function()
+			LG:Send("DREQ", { k = wantK, r = wantR }, "WHISPER", rawSender or sender, "BULK")
+		end, 1 + math.random() * 8)
+	end
+	-- Lo que yo tengo y él no: anuncio mi resumen en breve para que me lo pidan a mí.
+	if not ds.soon and (iHaveMore(myK, k) or iHaveMore(myR, r)) then
+		local mine = ds
+		ds.soon = LG:ScheduleTimer(function()
+			mine.soon = nil
+			ns.SendDigestRound(true)
+		end, 20 + math.random() * 40)
+	end
+end
+
+-- Los registros de tbl de los cubos pedidos ({ [informante] = { día, … } }).
+local function recordsIn(tbl, wanted, max)
+	local set = {}
+	for who, days in pairs(type(wanted) == "table" and wanted or {}) do
+		if type(who) == "string" and type(days) == "table" then
+			set[who] = {}
+			for _, day in ipairs(days) do if tonumber(day) then set[who][tonumber(day)] = true end end
+		end
+	end
+	local list = {}
+	for _, rec in pairs(tbl) do
+		local who = rec.reporter or "?"
+		if set[who] and set[who][math.floor((rec.t or 0) / 86400)] then list[#list + 1] = rec end
+	end
+	table.sort(list, function(a, b) return a.t > b.t end)
+	for i = #list, max + 1, -1 do list[i] = nil end
+	return list
+end
+
+ns.handlers.DREQ = function(sender, data, distribution, rawSender)
+	local g = LG:GuildData()
+	if not g or distribution ~= "WHISPER" or type(data) ~= "table" then return end
+	if GetTime() - (ds.answered[sender] or -math.huge) < DREQ_EVERY then return end
+	local kills, runs = recordsIn(g.kills, data.k, DSUM_MAX), recordsIn(g.runs, data.r, DSUM_MAX)
+	if #kills + #runs == 0 then return end
+	ds.answered[sender] = GetTime()
+	ns.SyncLog("dreq", { from = sender, kills = #kills, runs = #runs })
+	LG:SendParts("FILL", { kills = kills, runs = runs }, "WHISPER", rawSender or sender, "BULK")
+end
+
+-- ¿Conozco ya lo de la hermandad? (sincronización recibida en esta sesión, o 3 min sin respuesta).
+-- Hasta entonces no se escribe en el chat ni se anuncia la hermandad a la red con datos a medias.
+function ns.SyncSettled()
+	if LG:InTestMode() or LG.lastSync then return true end
+	return LG.loginAt ~= nil and GetTime() - LG.loginAt > 180
+end
+
 local function recentCache(cache, max)
 	local list = {}
 	for guid, c in pairs(cache) do list[#list + 1] = { guid = guid, t = c.t or 0 } end
@@ -651,8 +799,20 @@ local function recentCache(cache, max)
 	return out
 end
 
+-- Diagnóstico: las últimas peticiones y respuestas de sincronización completa, en
+-- global.diag.syncLog (para ver en el SavedVariables si la del inicio de sesión llega).
+function ns.SyncLog(ev, info)
+	local diag = LG.db.global.diag
+	diag.syncLog = diag.syncLog or {}
+	local e = info or {}
+	e.ev, e.t, e.guild, e.char = ev, date("%Y-%m-%d %H:%M:%S"), LG:GuildName(), ns.PlayerFullName()
+	table.insert(diag.syncLog, e)
+	while #diag.syncLog > 20 do table.remove(diag.syncLog, 1) end
+end
+
 function LG:StartSync()
 	local g = self:GuildData()
+	ns.SyncLog(g and "hello" or "hello-sin-hermandad")
 	if not g then return end
 	self:SendMyRecord()
 	self:Send("HELLO", { kills = newest(g.kills), runs = newest(g.runs), killsBy = newestBy(g.kills), runsBy = newestBy(g.runs),
@@ -707,6 +867,9 @@ ns.handlers.HELLO = function(sender, data, _, rawSender)
 			bgMatches = g.bgMatches,
 			bounties = g.bounties,
 			purchases = g.purchases,
+			attempts = g.attempts,
+			runStats = g.runStats,
+			guildTabards = g.guildTabards,
 			bankLog = g.bankLog,
 			bankRequests = g.bankRequests,
 			bankAsks = g.bankAsks,

@@ -29,6 +29,8 @@ ns.SHOP_ITEMS = {
 		icon = "Interface\\Icons\\INV_Fabric_Silk_02", desc = L["Fondo púrpura real para tu estuche de medallas."] },
 	{ key = "tribeCreate", kind = "fee", price = 50, label = L["Fundar una tribu"],
 		icon = "Interface\\Icons\\Spell_Holy_PrayerOfFortitude", desc = L["Se reparte entre los fundadores: cada uno paga su parte al aceptar. Si un oficial la rechaza, no se cobra."] },
+	{ key = "officialRun", kind = "fee", price = 15, label = L["Intento oficial"],
+		icon = "Interface\\Icons\\INV_Misc_PocketWatch_02", desc = L["Cada miembro del grupo, para que la partida cuente en los récords de la hermandad (JcE)."] },
 	{ key = "tribeIcon", kind = "fee", price = 50, label = L["Icono de tribu"],
 		icon = "Interface\\Icons\\INV_Misc_Note_02", desc = L["Cambiar el icono de tu tribu por uno elegido."] },
 }

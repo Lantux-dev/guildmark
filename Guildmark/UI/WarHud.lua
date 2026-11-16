@@ -66,6 +66,7 @@ local function create()
 	f.title:SetWordWrap(false)
 
 	f.close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	ns.FixCloseButton(f, f.close)
 	f.close:SetSize(20, 20)
 	f.close:SetPoint("TOPRIGHT", 0, 0)
 	f.close:SetScript("OnClick", function()

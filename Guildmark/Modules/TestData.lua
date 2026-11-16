@@ -41,8 +41,8 @@ local function pickEnemy()
 end
 
 function ns.ClearTestData(g)
-	for _, tableName in ipairs({ "members", "kills", "runs", "orders", "events", "spends", "adjustments", "lfg", "tribes", "projects", "donations", "chestMoves", "bgMatches", "bankAsks" }) do
-		for key, rec in pairs(g[tableName]) do
+	for _, tableName in ipairs({ "members", "kills", "runs", "orders", "events", "spends", "adjustments", "lfg", "tribes", "projects", "donations", "chestMoves", "bgMatches", "bankAsks", "attempts", "purchases" }) do
+		for key, rec in pairs(g[tableName] or {}) do
 			if type(rec) == "table" and rec.test then
 				g[tableName][key] = nil
 				if tableName == "events" then g.attendance[key] = nil end
@@ -233,6 +233,17 @@ local function fillPvE(g, hunters, now, me)
 		g.runs[key] = { key = key, test = true, t = t, entered = t - minutes * 60, instance = dest, creatures = { npc },
 			encounterID = 9000 + i, boss = "Jefe final", members = team, guildMembers = team, guildCount = #team, size = 5,
 			witnesses = { [team[1]] = true, [team[2]] = true }, reporter = team[1] }
+		-- Intento oficial pagado por los cinco: cuenta para los récords (Dungeon.lua).
+		local members = {}
+		for _, m in ipairs(team) do members[#members + 1] = m end
+		table.sort(members)
+		local att = ('test:att:%d'):format(i)
+		g.attempts = g.attempts or {}
+		g.attempts[att] = { id = att, test = true, by = team[1], t = t - minutes * 60 - 60, members = members }
+		for j, m in ipairs(team) do
+			local pid = ('test:pay:%d:%d'):format(i, j)
+			g.purchases[pid] = { id = pid, test = true, member = m, t = t - minutes * 60 - 50, item = 'officialRun', ref = att }
+		end
 	end
 	timed(1, "Las Minas de la Muerte", 639, 41.5, { me, hunters[2], hunters[3], hunters[4], hunters[5] })
 	timed(2, "Las Minas de la Muerte", 639, 52.2, { hunters[2], hunters[6], hunters[7], hunters[8], me })

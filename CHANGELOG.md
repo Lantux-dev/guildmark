@@ -1,5 +1,65 @@
 # Cambios · Changelog
 
+## 1.3.0 · 2026-11
+
+**PvE**
+- **New: PvE > Records and PvE > History.** Records shows a podium for each dungeon. History shows every guild run as a card with its members, bosses, time, deaths (or "no deaths"), gold looted and the best loot (hover for the item).
+- **Official attempts:** only official runs count for guild records. An official run is a full guild group (5/5, or the whole raid), declared before the first kill, with every member paying 15 badges. The time starts at the first kill, not at the entrance, and leaving and coming back is still the same run. During an official attempt you see your pace against the record at each boss, and a new record is announced to the guild.
+- **Guild group = more than half the group from the guild** (3/5, 6/10, 13/25, 21/40) for achievements, legacy challenges and medals. Badges per dungeon still need 4 or 5. The history shows runs with 3 or more from the guild; outsiders appear in grey.
+- **New dungeons recognised:** the final boss of Forever's new dungeons is learned from your own runs.
+- **Four new guild achievements:** Flawless (a dungeon with nobody dying), Untouchables (10 of them), Legendary Loot (an epic drop) and Treasure Hunters (100 gold looted across guild dungeons).
+- Dungeon cards use the game's own loading-screen art.
+
+**PvP**
+- **PvP > Targets redesigned:** rank enemy guilds by *Who we hunt most* or *Who kills us most* over 7 days, 30 days or all time. Each card shows a kills/deaths bar, our best hunter and their most dangerous player, plus the enemy guild's tabard, shared across the guild once anyone has seen it.
+- **One death, one kill:** when several members get honor for the same kill, guild totals (achievements, faction season, activity, tribes) count it once. Personal rankings still give everyone their kill.
+- **Fixed: death warnings sometimes showed twice.** The game can report one death twice, and the addon saved it twice. Copies are now ignored when they arrive from members on older versions, and copies already saved stop counting.
+- The first faction season starts on Forever's launch day for everyone, so every addon announces the same totals.
+
+**Sync**
+- Every 20 minutes, online members compare a summary of the last three weeks of kills and dungeons and fill in each other's gaps, so what one member missed is no longer lost until someone logs in.
+- Guild chat posts and network announcements wait until the addon has synced, so an alt or a fresh install no longer posts things the guild already had, or posts in guilds that turned announcements off.
+- Faction hunter lists keep the most complete version received (for 2 hours), so an older addon no longer replaces them with an empty list.
+
+**Performance**
+- **Fewer stutters:** working out achievements and the portrait badges now happens in small chunks in the background (a few milliseconds per frame) instead of freezing the game for 20–60 ms. Dungeon runs, duplicate kills and kill streaks are cached, and points were recalculated about twice as fast in testing.
+- Asking the game for the guild roster is limited to once every 15 seconds.
+- **"You're doing that too fast":** if this red game message appears, the addon now prints which addon (or the game) made the rate-limited calls just before it, so the right culprit can be reported.
+
+**Interface**
+- New round emblem for the minimap button and the window portrait; the guild name and its title sit on separate lines in the header.
+- The window close button works in combat, and while the window is open only Escape is captured: every other key still reaches the game.
+
+---
+
+**JcE**
+- **Nuevo: JcE > Récords y JcE > Historial.** Récords muestra un podio de cada mazmorra. Historial muestra cada partida de la hermandad como una tarjeta con sus miembros, jefes, tiempo, muertes (o «sin muertes»), oro conseguido y el mejor botín (pasa el ratón para ver el objeto).
+- **Intentos oficiales:** solo las partidas oficiales cuentan para los récords de la hermandad. Una partida oficial es un grupo entero de la hermandad (5/5, o la banda entera), declarada antes de la primera baja, en la que cada miembro paga 15 insignias. El tiempo empieza con la primera baja, no en la entrada, y salir y volver sigue siendo la misma partida. Durante un intento oficial ves tu ritmo frente al récord en cada jefe, y un récord nuevo se anuncia a la hermandad.
+- **Grupo de hermandad = más de la mitad del grupo de la hermandad** (3/5, 6/10, 13/25, 21/40) para logros, desafíos de legado y medallas. Las insignias por mazmorra siguen pidiendo 4 o 5. El historial muestra las partidas con 3 o más de la hermandad; los de fuera salen en gris.
+- **Mazmorras nuevas reconocidas:** el jefe final de las mazmorras nuevas de Forever se aprende de vuestras propias partidas.
+- **Cuatro logros de hermandad nuevos:** Impecable (una mazmorra sin que caiga nadie), Intocables (10), Botín de leyenda (que caiga un épico) y Cazatesoros (100 de oro entre todas las mazmorras de hermandad).
+- Las tarjetas de mazmorra usan el arte de las pantallas de carga del juego.
+
+**JcJ**
+- **JcJ > Objetivos renovado:** ordena las hermandades enemigas por *A quién más cazamos* o *Quién más nos mata* en 7 días, 30 días o el total. Cada tarjeta muestra una barra de bajas/muertes, nuestro mejor cazador y su jugador más peligroso, y el estandarte de la hermandad enemiga, que se comparte con toda la hermandad en cuanto alguien lo ve.
+- **Una muerte, una baja:** cuando varios del grupo reciben honor por la misma baja, los totales de la hermandad (logros, temporada de facción, actividad, tribus) la cuentan una vez. En los rankings personales cada uno sigue teniendo la suya.
+- **Arreglado: los avisos de muerte salían a veces dobles.** El juego puede avisar dos veces de una misma muerte y el addon la guardaba dos veces. Ahora se ignoran las copias que llegan de compañeros con versiones anteriores, y las que ya estaban guardadas dejan de contar.
+- La primera temporada de facción empieza para todos el día del lanzamiento de Forever, así que todos los addons anuncian los mismos totales.
+
+**Sincronización**
+- Cada 20 minutos, los conectados comparan un resumen de las bajas y mazmorras de las últimas tres semanas y se completan los huecos entre ellos, así que lo que se perdió uno ya no espera a que alguien vuelva a entrar.
+- Los mensajes en el chat de hermandad y los anuncios de la red esperan a que el addon se haya sincronizado: un alter o una instalación nueva ya no anuncia lo que la hermandad ya tenía, ni escribe en hermandades que han quitado los anuncios.
+- Las listas de cazadores de la facción se quedan con la versión más completa que llega (durante 2 horas): un addon antiguo ya no las sustituye por una lista vacía.
+
+**Rendimiento**
+- **Menos tirones:** el cálculo de los logros y de las insignias del retrato se hace ahora a trozos pequeños en segundo plano (unos milisegundos por frame) en vez de congelar el juego 20–60 ms de golpe. Las partidas de mazmorra, las bajas repetidas y las rachas se guardan en caché, y en las pruebas los puntos se recalculan casi el doble de rápido.
+- La petición de la lista de la hermandad al juego se limita a una cada 15 segundos.
+- **«Lo estás haciendo demasiado rápido»:** si sale este mensaje rojo del juego, el addon dice ahora qué addon (o el propio juego) hizo justo antes las llamadas con límite, para poder avisar al culpable.
+
+**Interfaz**
+- Emblema redondo nuevo en el botón del minimapa y en el retrato de la ventana; el nombre de la hermandad y su título van en líneas separadas en la cabecera.
+- El botón de cerrar la ventana funciona en combate, y con la ventana abierta solo se captura Escape: las demás teclas siguen llegando al juego.
+
 ## 1.2.0 · 2026-11
 
 - **PvP kills stay in sync between online members:** if the live message about a kill got lost (the game drops messages when there is a lot of traffic), members who were online never got it until they logged in again. Now each player regularly sends a tiny summary of how many of their own kills and deaths they have from today and yesterday, and anyone missing some asks them for the rest.

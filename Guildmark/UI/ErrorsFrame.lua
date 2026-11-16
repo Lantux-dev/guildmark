@@ -21,6 +21,7 @@ end
 
 local function create()
 	window = CreateFrame("Frame", "GuildmarkErrorsFrame", UIParent, "BasicFrameTemplateWithInset")
+	ns.FixCloseButton(window)
 	window:SetSize(WIDTH, HEIGHT)
 	window:SetFrameStrata("DIALOG")
 	window:SetPoint("CENTER", 0, 40)

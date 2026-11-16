@@ -115,7 +115,7 @@ local function guildHonors()
 		if f.tier then keys[#keys + 1] = ("feat:league:%d:%d"):format(f.season, f.tier)
 		elseif f.season then keys[#keys + 1] = ("feat:unbeaten:%d"):format(f.season) end
 	end
-	local points = ns.AchievementState().points
+	local points = ns.AchievementState(true).points
 	local best
 	for i, r in ipairs(ns.ACH_REWARDS) do
 		if r.title and points >= r.points then best = i end
@@ -175,11 +175,11 @@ end
 function ns.BadgeData(name, rawAuto)
 	local guild = LG:GuildName()
 	if not LG:GuildData() or not guild then return nil end
-	local rank = ns.MeritRank(name)
+	local rank = ns.MeritRank(name, true)
 	local r = ns.roster[name]
 	-- Su rango JcJ va delante de los honores de la hermandad (es lo único personal).
 	local honors = guildHonors()
-	local perks = ns.GuildPerks and ns.GuildPerks() or {}
+	local perks = ns.GuildPerks and ns.GuildPerks(true) or {}
 	if perks.elite then table.insert(honors, 1, "elite") end
 	local pr = ns.MemberPvPRank and ns.MemberPvPRank(name)
 	if pr and pr.level >= 1 then
@@ -205,6 +205,7 @@ end
 -- Insignias de otras hermandades, por la red
 ---------------------------------------------------------------------------
 
+local BANNER_EVERY = 30 -- insignias sobre el marco: como mucho cada 30 s (Banner:RefreshBanners)
 local remote = {} -- [nombre] = { t, data }
 local lastAsk = 0
 
@@ -477,6 +478,22 @@ function ns.ToggleBanner()
 	Banner:UpdateTarget()
 end
 
+function Banner:RefreshBanners()
+	self.bannerTimer = nil
+	if InCombatLockdown and InCombatLockdown() then
+		self.bannerPending = true
+		return
+	end
+	self.bannerPending, self.bannerAt = false, GetTime()
+	-- Fuera de combate: al día (calcula si hace falta, a trozos en segundo plano) y se pinta con eso.
+	ns.RunInBackground("insignias", function()
+		ns.Scores()
+		ns.AchievementState()
+		self:UpdatePlayer()
+		if UnitExists("target") then self:UpdateTarget() end
+	end)
+end
+
 function Banner:OnEnable()
 	playerStrip = createStrip("LantuxGuildPlayerBanner")
 	targetStrip = createStrip("LantuxGuildTargetBanner", true)
@@ -486,10 +503,17 @@ function Banner:OnEnable()
 		place()
 		self:UpdatePlayer()
 	end)
+	-- Rendimiento: con cada cambio de datos se recalculaba el libro de puntos y los logros solo
+	-- para esto (tirones de ~30 ms). Las insignias son cosméticas: como mucho cada BANNER_EVERY
+	-- segundos y nunca en combate; al salir de combate se ponen al día.
 	ns.OnDataChanged(function()
-		self:UpdatePlayer()
-		if UnitExists("target") then self:UpdateTarget() end
+		if self.bannerTimer then return end
+		local wait = math.max(1, (self.bannerAt or 0) + BANNER_EVERY - GetTime())
+		self.bannerTimer = self:ScheduleTimer("RefreshBanners", wait)
 	end, "insignias sobre el marco")
+	ns.RegisterEvent(self, "PLAYER_REGEN_ENABLED", function()
+		if self.bannerPending then self:RefreshBanners() end
+	end)
 	if EventRegistry and EventRegistry.RegisterCallback then
 		pcall(EventRegistry.RegisterCallback, EventRegistry, "EditMode.Exit", function() place() end, self)
 	end

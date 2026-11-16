@@ -118,14 +118,14 @@ local function medalFacts()
 			end
 		end
 	end
-	-- Mazmorras con la hermandad (como en los puntos: 4+ de la guild y 2+ testigos), una por día y mazmorra; bandas.
+	-- Mazmorras con la hermandad (más de la mitad de la guild y 2+ testigos), una por día y mazmorra; bandas.
 	local seen = {}
 	for _, r in pairs(g.runs) do
 		local witnesses = 0
 		for _ in pairs(r.witnesses or {}) do witnesses = witnesses + 1 end
 		if witnesses >= 2 then
-			local raid = r.raid and r.size >= 10 and r.guildCount >= r.size * 0.8
-			local dungeon = not r.raid and r.size == 5 and r.guildCount >= 4
+			local raid = r.raid and ns.GuildMajority(r)
+			local dungeon = not r.raid and ns.GuildMajority(r)
 			for _, member in ipairs(r.guildMembers or r.members or {}) do
 				if raid then f(member).raid = true end
 				if dungeon then

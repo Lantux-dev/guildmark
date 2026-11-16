@@ -402,6 +402,7 @@ end
 -- Pide al juego los registros (cada pestaña y el del dinero); llegan con GUILDBANKLOG_UPDATE.
 local function queryLogs()
 	if not QueryGuildBankLog then return end
+	if ns.MarkApiCall then ns.MarkApiCall("QueryGuildBankLog") end
 	local tabs = GetNumGuildBankTabs and GetNumGuildBankTabs() or 0
 	for tab = 1, tabs do pcall(QueryGuildBankLog, tab) end
 	pcall(QueryGuildBankLog, (MAX_GUILDBANK_TABS or 8) + 1) -- el registro del dinero

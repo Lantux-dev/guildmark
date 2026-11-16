@@ -85,6 +85,9 @@ local defaults = {
 				bgMatches = {},   -- [id] = resultado de un campo de batalla de un miembro (PvP.lua)
 				bounties = {},    -- [id] = insignias puestas por la cabeza de un enemigo (Bounty.lua)
 				purchases = {},   -- [id] = compra en la tienda (Shop.lua)
+				guildTabards = {}, -- [hermandad] = estandarte visto en un jugador suyo: colores y emblema (Hunt.lua)
+				runStats = {},    -- [id] = resumen de una partida de un miembro: oro, muertes y botín (Dungeon.lua)
+				attempts = {},    -- [id] = intento oficial de mazmorra o banda, para los récords (Dungeon.lua)
 				bankLog = {},     -- [clave] = depósito o retirada en el banco de la hermandad del juego (GuildBank.lua)
 				bankRequests = {}, -- [id] = pedido del banco: objeto, cantidad y recompensa del cofre (GuildBank.lua)
 				bankSnap = {},     -- foto del contenido del banco del juego: { tabs = { [n] = pestaña }, money } (BankVault.lua)
@@ -181,6 +184,36 @@ function ns.PlayerFullName()
 end
 
 -- Nombre para mostrar (ya no hay reino que recortar).
+-- Ordena una lista por su campo t (de menor a mayor) y, en los empates del mismo segundo, con
+-- tieLess(a, b) si se da. Rendimiento: un comparador en Lua sobre miles de registros era lo más
+-- caro del libro de puntos y de las rachas; así solo se ordenan con el comparador nativo los
+-- instantes distintos, y con tieLess los pocos que coinciden. Mismo resultado que
+-- table.sort(list, function(a, b) if a.t ~= b.t then return a.t < b.t end return tieLess(a, b) end).
+function ns.SortByTime(list, tieLess)
+	local byT, times = {}, {}
+	for _, x in ipairs(list) do
+		local t = x.t or 0
+		local bucket = byT[t]
+		if bucket then
+			bucket[#bucket + 1] = x
+		else
+			byT[t] = { x }
+			times[#times + 1] = t
+		end
+	end
+	table.sort(times)
+	local n = 0
+	for _, t in ipairs(times) do
+		local bucket = byT[t]
+		if #bucket > 1 and tieLess then table.sort(bucket, tieLess) end
+		for _, x in ipairs(bucket) do
+			n = n + 1
+			list[n] = x
+		end
+	end
+	return list
+end
+
 function ns.ShortName(full)
 	return full and ns.FullName(full) or full
 end
@@ -198,6 +231,13 @@ function ns.SameName(a, b)
 	local aHasSurname, bHasSurname = a:find(" ", 1, true), b:find(" ", 1, true)
 	if aHasSurname and bHasSurname then return false end
 	return ns.FirstName(a) == ns.FirstName(b)
+end
+
+-- La X de las plantillas del juego cierra por el gestor de ventanas, protegido en combate (no
+-- hacía nada): que oculte la ventana directamente.
+function ns.FixCloseButton(f, button)
+	local b = button or f.CloseButton or (f.GetName and f:GetName() and _G[f:GetName() .. "CloseButton"])
+	if type(b) == "table" and b.SetScript then b:SetScript("OnClick", function() f:Hide() end) end
 end
 
 function ns.ClassColorName(name, classFile)
@@ -329,8 +369,90 @@ local clock = debugprofilestop or function() return 0 end
 local perf = { since = nil, data = {} }
 local SPIKE_MS = 20 -- a partir de aquí se nota como un tirón
 
-function ns.PerfStart() return clock() end
+---------------------------------------------------------------------------
+-- Segundo plano: lo que no hace falta ver al instante (revisar logros, poner al día las
+-- insignias del marco) se calcula a trozos de BG_SLICE_MS por frame en una corrutina, en vez
+-- de congelar el juego 20-60 ms de golpe. Los bucles grandes llaman a ns.BackgroundYield().
+--   * Si llegan datos nuevos a mitad (LG:DataChanged), la tarea vuelve a empezar desde cero.
+--   * Si la ventana pide el libro de puntos ya (ns.Scores en primer plano), se calcula al
+--     momento y la tarea de fondo también vuelve a empezar (comparten tablas del libro).
+--   * Lua 5.1 no puede pausar dentro de un pcall ni de un comparador de table.sort: quien
+--     llama a código con pausas desde un pcall lo envuelve en ns.NoYield(1) / ns.NoYield(-1).
+--   * En combate no empieza ninguna tarea nueva.
+---------------------------------------------------------------------------
+local BG_SLICE_MS = 4
+local bg = { queue = {}, queued = {}, noYield = 0 }
+function ns.InBackground()
+	return bg.co ~= nil and coroutine.running() == bg.co
+end
+function ns.BackgroundYield()
+	if not bg.co or bg.noYield > 0 or coroutine.running() ~= bg.co then return end
+	if clock() - bg.sliceStart < BG_SLICE_MS then return end
+	coroutine.yield()
+end
+function ns.NoYield(delta)
+	bg.noYield = math.max(0, bg.noYield + delta)
+end
+-- La tarea en curso vuelve a la cola y empezará de nuevo (nunca desde dentro de sí misma).
+function ns.CancelBackground()
+	if not bg.co or ns.InBackground() then return end
+	local job = bg.job
+	bg.co, bg.job, bg.noYield = nil, nil, 0
+	if job and not bg.queued[job.name] then
+		table.insert(bg.queue, 1, job)
+		bg.queued[job.name] = true
+	end
+end
+local bgFrame
+local function bgStep()
+	if not bg.co then
+		local job = (InCombatLockdown and InCombatLockdown()) and nil or table.remove(bg.queue, 1)
+		if not job then
+			if #bg.queue == 0 and bgFrame then bgFrame:Hide() end
+			return
+		end
+		bg.queued[job.name] = nil
+		bg.co, bg.job, bg.noYield = coroutine.create(job.fn), job, 0
+	end
+	local co, job = bg.co, bg.job
+	bg.sliceStart = clock()
+	local ok, err = coroutine.resume(co)
+	ns.PerfStop("segundo plano: " .. job.name, bg.sliceStart)
+	if bg.co ~= co then return end -- se canceló desde dentro de este trozo
+	if not ok then
+		bg.co, bg.job = nil, nil
+		if geterrorhandler then geterrorhandler()(err) end
+	elseif coroutine.status(co) == "dead" then
+		bg.co, bg.job = nil, nil
+	end
+end
+-- ¿Hay algo en marcha o esperando? (pruebas y diagnóstico)
+function ns.BackgroundBusy() return bg.co ~= nil or #bg.queue > 0 end
+function ns.BackgroundFrame() return bgFrame end
+
+-- Pone una tarea en la cola (una sola por nombre). En las pruebas se ejecuta al momento.
+function ns.RunInBackground(name, fn)
+	if ns.SYNC_DATA_CHANGED or not CreateFrame then return fn() end
+	if bg.queued[name] or (bg.job and bg.job.name == name) then return end
+	bg.queue[#bg.queue + 1] = { name = name, fn = fn }
+	bg.queued[name] = true
+	if not bgFrame then
+		bgFrame = CreateFrame("Frame")
+		bgFrame:SetScript("OnUpdate", bgStep)
+	end
+	bgFrame:Show()
+end
+
+-- En segundo plano no se mide con PerfStart/PerfStop (contaría el tiempo en pausa): ya se
+-- mide cada trozo como «segundo plano: …».
+function ns.PerfStart()
+	if bg.co and coroutine.running() == bg.co then return nil end
+	return clock()
+end
+-- t0 nil = se empezó en segundo plano (PerfStart no mide ahí): no se apunta nada. Así quien
+-- mide un trozo suelto (comprimir un envío...) puede llamarse desde una tarea de fondo.
 function ns.PerfStop(label, t0)
+	if not t0 then return 0 end
 	local ms = clock() - t0
 	local d = perf.data[label]
 	if not d then
@@ -374,7 +496,10 @@ end
 local function wrap(tbl, key, label)
 	local fn = tbl and tbl[key]
 	if type(fn) ~= "function" then return end
-	tbl[key] = function(...) return perfFinish(label, clock(), fn(...)) end
+	tbl[key] = function(...)
+		if ns.InBackground() then return fn(...) end
+		return perfFinish(label, clock(), fn(...))
+	end
 end
 function ns.InstallPerfWraps()
 	if ns.perfWrapped then return end
@@ -431,8 +556,13 @@ end
 -- hermandades vistas, quién está conectado): se repinta sin recalcularlos, que es lo caro.
 -- light = "achievements": solo cuenta para logros (la ficha de un miembro sin cambio de nivel).
 function LG:DataChanged(light)
+	-- Lo que se calculaba en segundo plano ya no vale: vuelve a empezar con los datos nuevos.
+	if ns.CancelBackground then ns.CancelBackground() end
+	-- Partidas de JcE (cachés de LFG.lua): baratas de invalidar, se recalculan al pedirlas.
+	if ns.InvalidateRuns then ns.InvalidateRuns() end
 	if not light then
 		if ns.InvalidateScores then ns.InvalidateScores() end
+		if ns.InvalidateDuplicates then ns.InvalidateDuplicates() end
 	end
 	if not light or light == "achievements" then
 		if ns.InvalidateAchievements then ns.InvalidateAchievements() end
@@ -551,6 +681,76 @@ end
 -- Algunos eventos están prohibidos para addons en la beta de Forever. Si uno lo
 -- está, se apunta y no se vuelve a intentar, para que el aviso salga una sola vez.
 -- Devuelve false si el evento no está disponible.
+-- Chivato del «Estás haciendo eso demasiado rápido» (el aviso rojo del juego cuando algo se
+-- llama más de lo que el servidor permite): cada llamada con límite del addon se apunta con
+-- ns.MarkApiCall y, si sale el aviso, se dice en el chat cuál fue la última (o que no fuimos).
+do
+	local recent = {} -- [nombre] = GetTime() de la última llamada
+	function ns.MarkApiCall(name) recent[name] = GetTime() end
+	-- Y las mismas funciones con límite llamadas por CUALQUIER addon (o por el juego): se observa
+	-- quién llama (hooksecurefunc no cambia nada, solo mira) para señalar al culpable.
+	local function caller()
+		-- La primera línea de la pila que no sea este chivato (Guildmark/Core.lua) dice quién llamó.
+		local stack = debugstack and debugstack(2, 8, 0) or ""
+		for line in stack:gmatch("[^\n]+") do
+			local addon, file = line:match("[Aa]dd[Oo]ns[/\\]([^/\\]+)[/\\]([^:%]\"]+)")
+			if addon and not (addon == "Guildmark" and file == "Core.lua") then return addon end
+		end
+		return "juego"
+	end
+	local WATCH = {
+		{ nil, "GuildRoster" }, { "C_GuildInfo", "GuildRoster" }, { nil, "RequestRaidInfo" }, { nil, "NotifyInspect" },
+		{ nil, "SendWho" }, { "C_FriendList", "SendWho" }, { nil, "QueryGuildBankTab" }, { nil, "QueryGuildBankLog" },
+		{ nil, "QueryGuildEventLog" }, { "C_GuildInfo", "QueryGuildNews" }, { nil, "QueryGuildNews" }, { nil, "RequestTimePlayed" },
+		{ nil, "RequestRatedInfo" }, { nil, "RequestPVPRewards" }, { "C_PvP", "RequestCrowdControlSpell" },
+		{ "C_MythicPlus", "RequestMapInfo" }, { "C_MythicPlus", "RequestRewards" }, { "C_MythicPlus", "RequestCurrentAffixes" },
+		{ "C_LFGList", "Search" }, { "C_Calendar", "OpenCalendar" }, { nil, "SetAchievementComparisonUnit" },
+		{ nil, "RequestLFDPlayerLockInfo" }, { nil, "RequestLFDPartyLockInfo" }, { nil, "RequestBattlefieldScoreData" },
+		{ "C_ChatInfo", "SendChatMessage" }, { nil, "SendChatMessage" },
+	}
+	if hooksecurefunc then
+		for _, w in ipairs(WATCH) do
+			local tbl = w[1] and _G[w[1]] or _G
+			local key = w[2]
+			if type(tbl) == "table" and type(tbl[key]) == "function" then
+				local label = (w[1] and (w[1] .. ".") or "") .. key
+				pcall(hooksecurefunc, tbl, key, function()
+					recent[caller() .. ": " .. label] = GetTime()
+				end)
+			end
+		end
+	end
+	local lastReport = -math.huge
+	local watcher = CreateFrame and CreateFrame("Frame")
+	if watcher and watcher.RegisterEvent then
+		pcall(watcher.RegisterEvent, watcher, "UI_ERROR_MESSAGE")
+		watcher:SetScript("OnEvent", function(_, _, _, message)
+			if type(message) ~= "string" then return end
+			local throttle = (ERR_GENERIC_THROTTLE and message == ERR_GENERIC_THROTTLE)
+				or message:find("demasiado rápido", 1, true) or message:lower():find("too fast", 1, true)
+			if not throttle or not LG.db then return end
+			local now = GetTime()
+			if now - lastReport < 10 then return end
+			lastReport = now
+			-- Todo lo vigilado de los últimos 3 s, lo más reciente primero: «addon: función (hace X s)».
+			local calls = {}
+			for name, t in pairs(recent) do
+				if now - t <= 3 then calls[#calls + 1] = { name = name, ago = now - t } end
+			end
+			table.sort(calls, function(a, b) return a.ago < b.ago end)
+			local parts = {}
+			for i = 1, math.min(5, #calls) do parts[i] = ("%s (%.1f s)"):format(calls[i].name, calls[i].ago) end
+			local who = table.concat(parts, ", ")
+			LG:Print(#calls > 0 and (L["Aviso «demasiado rápido». Llamadas con límite justo antes: %s"]):format(who)
+				or L["Aviso «demasiado rápido»: ningún addon ni el juego llamó a nada vigilado en los 3 s anteriores."])
+			local diag = LG.db.global.diag
+			diag.throttle = diag.throttle or {}
+			table.insert(diag.throttle, 1, { t = ns.Now(), who = who, zone = GetRealZoneText and GetRealZoneText() or nil })
+			while #diag.throttle > 10 do table.remove(diag.throttle) end
+		end)
+	end
+end
+
 function ns.RegisterEvent(obj, event, handler)
 	if LG.db.global.forbiddenEvents[event] then
 		LG:Debug("evento no disponible:", event)
@@ -637,6 +837,7 @@ function LG:PLAYER_ENTERING_WORLD(_, isLogin, isReload)
 end
 
 function LG:AfterLogin()
+	self.loginAt = GetTime()
 	self:RememberCharacter()
 	self:Prune()
 	if self.db.char.consent == "pending" then
@@ -711,6 +912,12 @@ function LG:Prune()
 		end
 		for key, r in pairs(g.runs) do
 			if now - (r.t or 0) > 90 * 86400 then g.runs[key] = nil end
+		end
+		for key, r in pairs(g.runStats or {}) do
+			if now - (r.t or 0) > 90 * 86400 then g.runStats[key] = nil end
+		end
+		for key, a in pairs(g.attempts or {}) do
+			if now - (a.t or 0) > 90 * 86400 then g.attempts[key] = nil end
 		end
 		for guid, c in pairs(g.guildCache) do
 			if now - (c.t or 0) > 30 * 86400 then g.guildCache[guid] = nil end

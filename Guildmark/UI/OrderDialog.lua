@@ -8,6 +8,7 @@ local BASE_H, LINE_H, MAX_LINES = 262, 24, 8
 
 local function create()
 	dialog = CreateFrame("Frame", "LantuxGuildOrderDialog", UIParent, "BasicFrameTemplateWithInset")
+	ns.FixCloseButton(dialog)
 	dialog:SetSize(360, BASE_H)
 	dialog:SetPoint("CENTER", 0, 120)
 	dialog:SetFrameStrata("DIALOG")

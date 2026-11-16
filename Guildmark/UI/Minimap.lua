@@ -30,7 +30,7 @@ local function create()
 	button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
 	local icon = button:CreateTexture(nil, "BACKGROUND")
-	icon:SetTexture(ns.MEDIA .. "emblem_small")
+	icon:SetTexture(ns.MEDIA .. "emblem_round") -- redondo, con fondo negro (encaja en el aro)
 	icon:SetSize(21, 21)
 	icon:SetPoint("TOPLEFT", 6, -5)
 

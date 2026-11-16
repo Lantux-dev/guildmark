@@ -389,6 +389,7 @@ local function create()
 		f = CreateFrame("Frame", "LantuxGuildAchievementsFrame", UIParent, "BasicFrameTemplateWithInset")
 	end
 	frame = f
+	ns.FixCloseButton(f)
 	f:SetSize(860, 560)
 	f:SetPoint("CENTER", 40, 0)
 	f:SetFrameStrata("HIGH")
@@ -413,7 +414,7 @@ local function create()
 	if f.SetPortraitAtlasRaw then
 		pcall(f.SetPortraitAtlasRaw, f, "Legacy-up-c60")
 	elseif f.SetPortraitToAsset then
-		pcall(f.SetPortraitToAsset, f, ns.MEDIA .. "emblem_small")
+		pcall(f.SetPortraitToAsset, f, ns.MEDIA .. "emblem_portrait")
 	end
 
 	-- Puntos: escudo y barra, como "Puntos de legado".

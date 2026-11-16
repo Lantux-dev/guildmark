@@ -130,6 +130,7 @@ local function create()
 	local ok, f = pcall(CreateFrame, "Frame", "GuildmarkProfileFrame", UIParent, "BasicFrameTemplateWithInset")
 	if not ok or not f then f = CreateFrame("Frame", "GuildmarkProfileFrame", UIParent) end
 	panel = f
+	ns.FixCloseButton(f)
 	f:SetSize(W, H)
 	f:SetFrameStrata("HIGH")
 	-- Toplevel: al pulsarla o arrastrarla pasa entera por delante de las otras ventanas del addon.

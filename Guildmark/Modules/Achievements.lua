@@ -62,8 +62,8 @@ function ns.GuildLevel(points)
 end
 
 -- Recompensas desbloqueadas: { level, title, [perk] = true }.
-function ns.GuildPerks()
-	local points = ns.AchievementState().points
+function ns.GuildPerks(stale)
+	local points = ns.AchievementState(stale).points
 	local perks = { level = ns.GuildLevel(points) }
 	for _, r in ipairs(ns.ACH_REWARDS) do
 		if points >= r.points then
@@ -94,8 +94,11 @@ local function gatherFacts(g)
 		raidBosses = {}, orders = {}, tippedOrders = {}, events = {}, auctions = {},
 	}
 	-- PvP
+	local dups = ns.DuplicateKills and ns.DuplicateKills(g) or {}
 	for _, k in pairs(g.kills) do
-		if k.kind == "kill" and k.honorable and not ns.IsVoided(g, k.id) then
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
+		-- Totales de la hermandad: una muerte, una baja (ns.DuplicateKills).
+		if k.kind == "kill" and k.honorable and not ns.IsVoided(g, k.id) and not dups[k.id] then
 			f.kills[#f.kills + 1] = k.t
 			if k.revenge then f.revenges[#f.revenges + 1] = k.t end
 			if k.guild and not k.bg then
@@ -104,19 +107,19 @@ local function gatherFacts(g)
 			end
 		end
 	end
-	-- Mazmorras (como en los puntos: 5 jugadores, 4+ de la hermandad, 2+ testigos) y bandas.
+	-- Mazmorras y bandas con grupo de hermandad (más de la mitad de la guild, 2+ testigos).
 	local seenDay, firstBoss = {}, {}
 	for _, r in pairs(g.runs) do
+		ns.BackgroundYield() -- trozos en segundo plano (Core.lua)
 		local witnesses = 0
 		for _ in pairs(r.witnesses or {}) do witnesses = witnesses + 1 end
 		if witnesses >= 2 then
 			if r.raid then
-				-- Banda de hermandad: al menos el 80 % del grupo es de la guild.
-				if r.size >= 10 and r.guildCount >= r.size * 0.8 then
+				if ns.GuildMajority(r) then
 					local key = tostring(r.encounterID or r.boss)
 					if not firstBoss[key] or r.t < firstBoss[key].t then firstBoss[key] = { t = r.t, name = r.boss } end
 				end
-			elseif r.size == 5 and r.guildCount >= 4 then
+			elseif ns.GuildMajority(r) then
 				local dayKey = ("%s|%d"):format(tostring(r.instanceID or r.instance), math.floor(r.t / 86400))
 				if not seenDay[dayKey] or r.t < seenDay[dayKey] then seenDay[dayKey] = r.t end
 				local name = r.instance or "?"
@@ -125,6 +128,17 @@ local function gatherFacts(g)
 		end
 	end
 	for _, t in pairs(seenDay) do f.dungeonDays[#f.dungeonDays + 1] = t end
+	-- Partidas (1.3, LFG.lua) con grupo de hermandad: sin muertes, botín épico y oro sacado.
+	f.flawless, f.epicLoot, f.dungeonGold = {}, {}, 0
+	for _, run in ipairs(ns.DungeonRuns and ns.DungeonRuns() or {}) do
+		if not run.raid and run.witnesses >= 2 and ns.GuildMajority(run) then
+			if run.flawless then f.flawless[#f.flawless + 1] = run.t end
+			for _, x in ipairs(run.loot) do
+				if x.q >= 4 then f.epicLoot[#f.epicLoot + 1] = x.t or run.t break end
+			end
+			f.dungeonGold = f.dungeonGold + math.floor(run.gold / 10000)
+		end
+	end
 	for _, b in pairs(firstBoss) do f.raidBosses[#f.raidBosses + 1] = b.t end
 	-- Artesanía, eventos y mercado
 	for _, o in pairs(g.orders) do
@@ -409,7 +423,15 @@ local ACH = {
 
 	-- Mazmorras
 	{ id = "dungeons1", cat = "pve", name = L["Espeleólogos de hermandad novicios"], icon = "Interface\\Icons\\INV_Misc_Key_03",
-		desc = L["Completa 10 mazmorras con un grupo de hermandad (4 o 5 de la guild)."], eval = counter("dungeonDays", 10) },
+		desc = L["Completa 10 mazmorras con un grupo de hermandad (3 o más de la guild)."], eval = counter("dungeonDays", 10) },
+	{ id = "flawless1", cat = "pve", name = L["Impecable"], icon = "Interface\\Icons\\Spell_Holy_InnerFire",
+		desc = L["Completa una mazmorra con un grupo de hermandad sin que caiga nadie (todos con el addon)."], eval = counter("flawless", 1) },
+	{ id = "flawless2", cat = "pve", name = L["Intocables"], icon = "Interface\\Icons\\Ability_Defend",
+		desc = L["Completa 10 mazmorras con un grupo de hermandad sin que caiga nadie."], eval = counter("flawless", 10) },
+	{ id = "epicLoot1", cat = "pve", name = L["Botín de leyenda"], icon = "Interface\\Icons\\INV_Misc_Gem_Pearl_04",
+		desc = L["Que caiga un objeto épico en una mazmorra con un grupo de hermandad."], eval = counter("epicLoot", 1) },
+	{ id = "dungeonGold1", cat = "pve", name = L["Cazatesoros"], icon = "Interface\\Icons\\INV_Misc_Coin_01",
+		desc = L["Sacad 100 de oro entre todas las mazmorras con grupo de hermandad (lo que apunta el addon)."], eval = snapshot("dungeonGold", 100) },
 	{ id = "dungeons2", cat = "pve", name = L["Espeleólogos de hermandad veteranos"], icon = "Interface\\Icons\\INV_Misc_Key_03",
 		desc = L["Completa 50 mazmorras con un grupo de hermandad."], eval = counter("dungeonDays", 50) },
 	{ id = "dungeons3", cat = "pve", name = L["Maestros espeleólogos de hermandad"], icon = "Interface\\Icons\\INV_Misc_Key_03",
@@ -430,7 +452,7 @@ local ACH = {
 
 	-- Bandas
 	{ id = "raid1", cat = "pve", name = L["Primera sangre en banda"], icon = "Interface\\Icons\\INV_Misc_Head_Dragon_01",
-		desc = L["Derrota a un jefe de banda con un grupo de hermandad (80 % de la guild)."], eval = counter("raidBosses", 1) },
+		desc = L["Derrota a un jefe de banda con un grupo de hermandad (más de la mitad de la guild)."], eval = counter("raidBosses", 1) },
 	{ id = "raid2", cat = "pve", name = L["Asaltantes de hermandad"], icon = "Interface\\Icons\\INV_Misc_Head_Dragon_01",
 		desc = L["Derrota a 5 jefes de banda distintos con un grupo de hermandad."], eval = counter("raidBosses", 5) },
 	{ id = "raid3", cat = "pve", name = L["Azote de jefes"], icon = "Interface\\Icons\\INV_Misc_Head_Dragon_01",
@@ -628,10 +650,13 @@ ns.ACHIEVEMENTS = ACH
 ---------------------------------------------------------------------------
 
 local cache
+local lastState -- el último cálculo, aunque esté invalidado (stale)
 
 -- Devuelve { list = { { def, progress, target, done, doneAt, criteria } }, points, total }.
-function ns.AchievementState()
+-- stale = true: vale el último cálculo aunque haya cambiado algo (solo para lo cosmético).
+function ns.AchievementState(stale)
 	if cache then return cache end
+	if stale and lastState then return lastState end
 	local g = LG:GuildData()
 	-- Catálogo fijo más los de mazmorras y bandas de legado (Legacy.lua, si están encendidos).
 	local defs = {}
@@ -646,6 +671,8 @@ function ns.AchievementState()
 	local state = { list = {}, byId = {}, points = 0, total = total }
 	if not g then return state end
 	local f = gatherFacts(g)
+	-- Dentro de un pcall no se puede pausar (Lua 5.1): la evaluación de cada logro, sin trozos.
+	if ns.NoYield then ns.NoYield(1) end
 	for _, def in ipairs(defs) do
 		local ok, progress, target, doneAt, criteria = pcall(def.eval, f)
 		if not ok then progress, target, doneAt, criteria = 0, 1, nil, nil end
@@ -660,7 +687,8 @@ function ns.AchievementState()
 		state.list[#state.list + 1] = entry
 		state.byId[def.id] = entry
 	end
-	cache = state
+	if ns.NoYield then ns.NoYield(-1) end
+	cache, lastState = state, state
 	return state
 end
 
@@ -769,9 +797,19 @@ function ns.AchievementRewards()
 end
 
 -- Revisa si hay desafíos recién completados: guarda su fecha, la comparte y los anuncia.
+-- Recalcular a la fuerza (por los logros que dependen de la hora) como mucho cada FULL_CHECK_EVERY:
+-- lo demás ya invalida la caché al cambiar (LG:DataChanged). Antes cada refresco, aunque fuera
+-- de quién está conectado, forzaba el cálculo entero (tirones de 30-170 ms).
+local FULL_CHECK_EVERY = 300
 function Achievements:Check()
 	local g = LG:GuildData()
 	if not g or not LG:HasConsent() then return end
+	-- En combate, al salir.
+	if InCombatLockdown and InCombatLockdown() and not ns.SYNC_DATA_CHANGED then
+		self.combatPending = true
+		return
+	end
+	self.combatPending = nil
 	-- Al entrar, la sincronización grande (SYNC) tarda en llegar: hasta entonces faltan
 	-- los logros que la hermandad ya tenía y saldrían como nuevos. Se espera a que llegue.
 	local waited = GetTime() - (self.enabledAt or 0)
@@ -779,7 +817,7 @@ function Achievements:Check()
 		if not self.graceTimer then
 			self.graceTimer = self:ScheduleTimer(function()
 				self.graceTimer = nil
-				self:Check()
+				self:QueueCheck()
 			end, SYNC_GRACE - waited + 1)
 		end
 		return
@@ -787,7 +825,10 @@ function Achievements:Check()
 	-- Sin sincronizar y sin logros guardados (addon recién instalado y nadie contesta):
 	-- se guardan sin anunciarlos, porque seguramente la hermandad ya los tenía.
 	local silent = not LG.lastSync and next(g.achievements) == nil
-	ns.InvalidateAchievements()
+	if ns.SYNC_DATA_CHANGED or GetTime() - (self.lastFull or -math.huge) >= FULL_CHECK_EVERY then
+		ns.InvalidateAchievements()
+		self.lastFull = GetTime()
+	end
 	local state = ns.AchievementState()
 	local now = ns.Now()
 	local newOnes, newPoints = {}, 0
@@ -816,15 +857,23 @@ function Achievements:Check()
 	end
 end
 
+-- La revisión de logros, a trozos en segundo plano (Core.lua): sin tirones aunque se recalcule todo.
+function Achievements:QueueCheck()
+	ns.RunInBackground("logros", function() self:Check() end)
+end
+
 function Achievements:OnEnable()
 	self.enabledAt = GetTime()
 	self:RegisterMessage("LANTUX_DATA_CHANGED", function()
-		-- Se agrupan los cambios: la revisión se hace un instante después.
+		-- Se agrupan los cambios: la revisión se hace un instante después, en segundo plano.
 		if self.pending then return end
 		self.pending = self:ScheduleTimer(function()
 			self.pending = nil
-			self:Check()
+			self:QueueCheck()
 		end, 2)
 	end)
-	self:ScheduleTimer("Check", 15)
+	self:ScheduleTimer("QueueCheck", 15)
+	ns.RegisterEvent(self, "PLAYER_REGEN_ENABLED", function()
+		if self.combatPending then self:QueueCheck() end
+	end)
 end

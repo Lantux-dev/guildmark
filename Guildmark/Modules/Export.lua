@@ -65,7 +65,7 @@ local function huntSection(g)
 	-- El rival más peligroso de cada hermandad objetivo (para los carteles de "SE BUSCA").
 	local dangerous = {}
 	for _, k in pairs(g.kills) do
-		if k.kind == "death" and k.guild and not k.bg and k.t >= since and not ns.IsVoided(g, k.id) then
+		if k.kind == "death" and k.guild and not k.bg and k.t >= since and not ns.IsVoided(g, k.id) and not ns.IsDuplicateKill(g, k.id) then
 			local d = dangerous[k.guild] or {}
 			d[k.killerName or "?"] = (d[k.killerName or "?"] or 0) + 1
 			dangerous[k.guild] = d

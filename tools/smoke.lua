@@ -70,6 +70,9 @@ C_TradeSkillUI = {}
 date, time = os.date, os.time
 GetServerTime = function() return NOW end
 GetTime = function() return 1000 + (GET_TIME_OFFSET or 0) end
+-- Reloj de rendimiento que avanza solo (ms): así el segundo plano llega a partir en trozos.
+local fakeMs = 0
+debugprofilestop = function() fakeMs = fakeMs + (FAKE_MS_STEP or 0.01); return fakeMs end
 GetLocale = function() return SMOKE_LOCALE or "esES" end
 GetRealmName, GetNormalizedRealmName = function() return "Classic Beta PvP 2" end, function() return "ClassicBetaPvP2" end
 UnitName = function(u) if u == "player" then return "Lantux", "Dev" end return nil end
@@ -155,6 +158,8 @@ for _, entry in ipairs(SOURCES) do
 end
 
 local LG = ns.LG
+ns.SEASON1_START = 0 -- el reloj simulado es de antes del lanzamiento
+
 LG:OnInitialize()
 LG:OnEnable()
 for _, k in ipairs({ "Roster", "PvP", "Dungeon", "Hunt", "Professions", "Orders", "Events" }) do end
@@ -1037,9 +1042,146 @@ do
 	assert(not ns.MyLFGGroup(), "cerrado")
 	assert(ns.CreateLFG("minas", 5, "healer") == nil and ns.MyLFGGroup().dest == "Las Minas de la Muerte", "destino por un trozo del nombre")
 	assert(ns.CreateLFG("x", 7, "dps") ~= nil, "tamaño no válido")
+	-- Caché de partidas (LFG.lua): con el reloj simulado parado no caduca, y las pruebas tocan g.runs
+	-- a mano. Comprobar que cachea e invalida; luego, cada consulta de las pruebas como un refresco nuevo.
+	do
+		local g = LG:GuildData()
+		local a = ns.DungeonRuns()
+		assert(ns.DungeonRuns() == a, "caché de partidas: misma lista en el mismo refresco")
+		LG:DataChanged(true)
+		assert(ns.DungeonRuns() ~= a, "caché de partidas: DataChanged la invalida")
+		local d = ns.DuplicateKills(g)
+		assert(ns.DuplicateKills(g) == d, "caché de duplicados: misma tabla en el mismo frame")
+		ns.MergeKill(g, { id = "cachetest", kind = "kill", t = 1, victim = "x", reporter = "y" })
+		assert(ns.DuplicateKills(g) ~= d, "caché de duplicados: una baja nueva la invalida")
+		g.kills.cachetest = nil
+		ns.InvalidateDuplicates()
+		local realRuns = ns.DungeonRuns
+		ns.DungeonRuns = function() ns.InvalidateRuns(); return realRuns() end
+		-- Orden por tiempo: igual que table.sort con desempate, con muchos empates.
+		local list, ref = {}, {}
+		for i = 1, 300 do
+			local x = { t = (i * 7919) % 41, id = ("k%03d"):format((i * 131) % 300) }
+			list[i], ref[i] = x, x
+		end
+		ns.SortByTime(list, function(x, y) return x.id < y.id end)
+		table.sort(ref, function(x, y) if x.t ~= y.t then return x.t < y.t end return x.id < y.id end)
+		for i = 1, 300 do assert(list[i] == ref[i], "SortByTime: mismo orden que table.sort") end
+		-- Rachas: reutilizadas mientras no cambian las bajas.
+		local st = ns.KillStreaks(g)
+		assert(ns.KillStreaks(g) == st, "caché de rachas: misma tabla sin cambios")
+		ns.MergeKill(g, { id = "cachetest2", kind = "kill", honorable = true, t = 2, victim = "x", killerName = me, reporter = me })
+		assert(ns.KillStreaks(g) ~= st, "caché de rachas: una baja nueva la invalida")
+		g.kills.cachetest2 = nil
+		ns.InvalidateDuplicates()
+		-- Insignias sobre el marco: el último cálculo sirve aunque esté invalidado.
+		local sc = ns.Scores()
+		ns.InvalidateScores()
+		assert(ns.Scores(true) == sc and ns.Scores() ~= sc, "puntos: stale da el último cálculo, sin stale recalcula")
+		print_("OK cachés: partidas, duplicados, rachas y puntos se reutilizan y se invalidan")
+		-- Segundo plano de verdad (Core.lua): a trozos, mismo resultado que en primer plano y,
+		-- si llegan datos a mitad, vuelve a empezar.
+		ns.InvalidateScores()
+		local fgScores = ns.Scores()
+		ns.InvalidateAchievements()
+		local fgPoints = ns.AchievementState().points
+		local function runAll(onStep)
+			local frame = ns.BackgroundFrame()
+			local steps = 0
+			while ns.BackgroundBusy() and steps < 100000 do
+				frame._scripts.OnUpdate(frame, 0.016)
+				steps = steps + 1
+				if onStep then onStep(steps) end
+			end
+			assert(not ns.BackgroundBusy(), "segundo plano: termina")
+			return steps
+		end
+		ns.SYNC_DATA_CHANGED = nil; FAKE_MS_STEP = 0.5 -- reloj rápido: muchos trozos
+		ns.InvalidateScores(); ns.InvalidateAchievements()
+		local bgScores, bgPoints
+		ns.RunInBackground("prueba", function() bgScores = ns.Scores(); bgPoints = ns.AchievementState().points end)
+		assert(not bgScores, "segundo plano: no se calcula al ponerlo en la cola")
+		local steps = runAll()
+		assert(steps > 3, "segundo plano: a trozos (" .. steps .. " frames)")
+		for name, s in pairs(fgScores) do
+			assert(bgScores[name] and bgScores[name].merits == s.merits and bgScores[name].rep == s.rep, "segundo plano: mismos puntos para " .. name)
+		end
+		assert(bgPoints == fgPoints, "segundo plano: mismos logros")
+		-- Datos nuevos a mitad: se cancela y vuelve a empezar; el resultado final es bueno.
+		ns.InvalidateScores()
+		local runs, final = 0, nil
+		ns.RunInBackground("prueba", function() runs = runs + 1; final = ns.Scores() end)
+		runAll(function(step)
+			if step == 2 then
+				ns.SYNC_DATA_CHANGED = true
+				LG:DataChanged()
+				ns.SYNC_DATA_CHANGED = nil; FAKE_MS_STEP = 0.5 -- reloj rápido: muchos trozos
+			end
+		end)
+		-- Medir un trozo suelto desde una tarea de fondo (comprimir un envío al anunciar un logro):
+		-- PerfStart da nil ahí y PerfStop no debe romper la tarea (error de Core.lua:453).
+		local measured
+		ns.RunInBackground("medir", function()
+			ns.PerfStop("prueba: trozo", ns.PerfStart())
+			LG:Send("ping", { t = 1 })
+			measured = true
+		end)
+		runAll()
+		assert(measured, "segundo plano: PerfStart/PerfStop y enviar desde una tarea de fondo")
+		ns.SYNC_DATA_CHANGED = true
+		assert(runs == 2 and final and final[me] and final[me].merits == fgScores[me].merits, "segundo plano: cancelado por datos nuevos y repetido (" .. runs .. ")")
+		FAKE_MS_STEP = nil
+		print_(("OK segundo plano: %d frames, mismo resultado, se repite si cambian los datos"):format(steps))
+	end
 	-- Tiempos: mejor marca por mazmorra.
 	local times = ns.DungeonTimes()
-	assert(#times == 2 and times[1].dungeon == "Las Minas de la Muerte" and math.floor(times[1].runs[1].duration / 60) == 41, "tiempos de ejemplo")
+	-- Récords: solo partidas oficiales (intento pagado por los cinco). En la de Cuevas uno no tenía
+	-- insignias para pagar: queda en el historial, pero no es récord.
+	-- Récords: solo partidas oficiales (intento con los cinco y pagado por todos).
+	local minas
+	for _, d in ipairs(times) do
+		for _, run in ipairs(d.runs) do assert(run.official, 'todo récord es oficial') end
+		if d.dungeon == 'Las Minas de la Muerte' then minas = d end
+	end
+	assert(minas and math.floor(minas.runs[1].duration / 60) == 41, 'récord de las Minas: 41 min')
+	assert(#ns.DungeonHistory() == 3, 'historial con las tres partidas')
+	-- Intento sin pagar (o sin todos): queda en el historial, sin sello oficial ni récord.
+	local team = { 'Aa', 'Bb', 'Cc', 'Dd', 'Ee' }
+	g.runs['nopaid'] = { key = 'nopaid', t = NOW - 100, entered = NOW - 3000, started = NOW - 2900, instance = 'Horado Rajacieno', instanceID = 47,
+		creatures = { 4421 }, encounterID = 1, boss = 'Charlga', members = team, guildMembers = team, guildCount = 5, size = 5,
+		witnesses = { Aa = true, Bb = true }, reporter = 'Aa' }
+	g.attempts['nopaid'] = { id = 'nopaid', by = 'Aa', t = NOW - 3000, members = team }
+	local found
+	for _, r in ipairs(ns.DungeonHistory()) do if r.recKeys['nopaid'] then found = r end end
+	assert(found and found.finished and not found.official and found.duration == 2800, 'sin pagar: historial con tiempo desde la primera baja, sin sello')
+	for _, d in ipairs(ns.DungeonTimes()) do assert(d.dungeon ~= 'Horado Rajacieno', 'sin pagar: no es récord') end
+	g.runs['nopaid'], g.attempts['nopaid'] = nil, nil
+	-- Caso real (Ordo, 12/11): cada addon apunta su hora de entrada (2 s de diferencia) y el jefe
+	-- final llega por estadística desde otro; y en Excavación alguien volvió a entrar a mitad y el
+	-- final (sin estadística) lo conoce la hermandad por su encuentro. Una partida cada una, terminada.
+	local five = { 'Pa', 'Pb', 'Pc', 'Pd', 'Pe' }
+	local base = NOW - 50000
+	local function boss(key, t, entered, name, enc, stat, inst, instID)
+		g.runs[key] = { key = key, t = base + t, entered = base + entered, instance = inst or 'Horado Rajacieno', instanceID = instID or 47,
+			boss = name, encounterID = enc, finalStat = stat, members = five, guildMembers = five, guildCount = 5, size = 5,
+			witnesses = { Pa = true, Pb = true }, reporter = 'Pa' }
+	end
+	boss('h1', 530, 0, 'Jargba', 101); boss('h2', 690, 0, 'Aggem', 102); boss('h3', 1680, 0, 'Agathelos', 103)
+	boss('h4', 1917, 0, 'Charlga', 104); boss('h5', 1919, 2, 'Horado Rajacieno', nil, 6139)
+	boss('e1', 5000, 4300, 'Espinasal', 201, nil, 'Excavación: Los Humedales', 2998)
+	boss('e2', 5680, 5450, 'Sombradiente', 202, nil, 'Excavación: Los Humedales', 2998)
+	boss('e3', 6765, 4260, 'Guardián de reliquias', 3482, nil, 'Excavación: Los Humedales', 2998)
+	LG.db.global.legacyLearned[116054] = { [3482] = { boss = 'Guardián de reliquias', instanceID = 2998 } }
+	local horado, exc = 0, 0
+	for _, r in ipairs(ns.DungeonRuns()) do
+		if r.recKeys.h1 then horado = horado + 1 assert(r.finished and r.duration == 1919 and #r.bosses == 5, ('Horado entera: %s %s'):format(tostring(r.duration), #r.bosses)) end
+		if r.recKeys.h5 and not r.recKeys.h1 then horado = horado + 1 end
+		if r.recKeys.e1 then exc = exc + 1 assert(r.finished and r.duration == 6765 - 4260 and r.dungeon == 'Excavación: Los Humedales', 'Excavación terminada por el final aprendido') end
+		if (r.recKeys.e2 or r.recKeys.e3) and not r.recKeys.e1 then exc = exc + 1 end
+	end
+	assert(horado == 1 and exc == 1, ('una partida por mazmorra (Horado %d, Excavación %d)'):format(horado, exc))
+	for _, k in ipairs({ 'h1', 'h2', 'h3', 'h4', 'h5', 'e1', 'e2', 'e3' }) do g.runs[k] = nil end
+	LG.db.global.legacyLearned[116054] = nil
 	assert(ns.FormatRunTime(41.5 * 60) == "41:30", "formato del tiempo")
 	-- Entrada en la instancia: morir y volver no reinicia el reloj.
 	local instType, instID = "party", 36
@@ -1051,9 +1193,22 @@ do
 	instType = "none"; NOW = NOW + 120; ns.TrackInstanceEntry()
 	instType = "party"; NOW = NOW + 120; ns.TrackInstanceEntry()
 	assert(ns.InstanceEnteredAt() == entered, "volver tras morir no reinicia")
+	-- El tiempo empieza con la primera baja (no al entrar); salir y volver no lo mueve.
+	assert(ns.InstanceStartedAt() == entered, "sin bajas: el inicio es la entrada")
+	NOW = NOW + 300
+	ns.MarkFirstKill()
+	local firstKill = NOW
+	assert(ns.InstanceStartedAt() == firstKill, "inicio: la primera baja")
+	NOW = NOW + 60
+	ns.MarkFirstKill()
+	assert(ns.InstanceStartedAt() == firstKill, "las siguientes bajas no lo mueven")
+	instType = "none"; NOW = NOW + 120; ns.TrackInstanceEntry()
+	ns.MarkFirstKill() -- fuera no cuenta
+	instType = "party"; NOW = NOW + 120; ns.TrackInstanceEntry()
+	assert(ns.InstanceStartedAt() == firstKill, "morir y volver corriendo no reinicia el tiempo")
 	GetInstanceInfo = savedGII
 	-- Las vistas, con clics.
-	for _, section in ipairs({ "lfg", "times" }) do
+	for _, section in ipairs({ "lfg", "times", "history" }) do
 		ns.SelectTab("pve")
 		for _, f in ipairs(ALL_FRAMES) do
 			local onClick = rawget(f, "_scripts") and f._scripts.OnClick
@@ -1810,6 +1965,68 @@ do
 	print_("OK sincronización por resumen: recupera huecos antiguos y devuelve lo que falta al que responde")
 end
 
+-- Repaso completo entre conectados (DSUM/DREQ): tres miembros con huecos distintos acaban
+-- con lo mismo, sin importar quién respondió al entrar. Se simula el paso de mensajes.
+do
+	local savedKills, savedRuns, savedSend, savedST, savedNow, savedParts = g.kills, g.runs, LG.Send, LG.ScheduleTimer, NOW, LG.SendParts
+	local savedOffset = GET_TIME_OFFSET
+	local day = 86400
+	NOW = 100 * day
+	local function k(who, t) return { id = who .. ":" .. t, kind = "kill", t = t, reporter = who, killerName = who, victimName = "X" } end
+	local function r(who, t) return { key = who .. ":run:" .. t, id = who .. ":run:" .. t, t = t, reporter = who, instance = "Minas", members = { who }, size = 5, guildCount = 4 } end
+	local all = { k("Ana", 85 * day), k("Ana", 85 * day + 9), k("Bo", 90 * day), k("Bo", 99 * day), k("Cid", 95 * day), k("Cid", 95 * day + 60) }
+	local runs = { r("Ana", 88 * day), r("Cid", 97 * day) }
+	local function tbl(list, pick) local t = {} for i, x in ipairs(list) do if pick[i] then t[x.id] = x end end return t end
+	-- Cada cliente con un trozo distinto (nadie lo tiene todo).
+	local clients = {
+		A = { kills = tbl(all, { true, true, true, false, false, false }), runs = tbl(runs, { true, false }) },
+		B = { kills = tbl(all, { false, false, true, true, false, false }), runs = tbl(runs, { false, false }) },
+		C = { kills = tbl(all, { false, true, false, false, true, true }), runs = tbl(runs, { false, true }) },
+	}
+	local outbox, timers = {}, {}
+	local current
+	for _, c in pairs(clients) do c.state = { heard = -math.huge, sent = -math.huge, answered = {} } end
+	local function as(name) current = name g.kills, g.runs = clients[name].kills, clients[name].runs ns.SetDigestState(clients[name].state) end
+	LG.Send = function(_, kind, data, channel, target) outbox[#outbox + 1] = { from = current, kind = kind, data = data, target = target } end
+	LG.SendParts = function(_, kind, data, channel, target) outbox[#outbox + 1] = { from = current, kind = kind, data = data, target = target } end
+	LG.ScheduleTimer = function(_, fn) timers[#timers + 1] = { who = current, fn = fn } return 1 end
+	local function deliver()
+		for _ = 1, 50 do
+			while #timers > 0 do local t = table.remove(timers, 1) as(t.who) t.fn() end
+			if #outbox == 0 then return end
+			local m = table.remove(outbox, 1)
+			GET_TIME_OFFSET = (GET_TIME_OFFSET or 0) + 120 -- cada mensaje, 2 min después (límites por minuto)
+			for name in pairs(clients) do
+				if name ~= m.from and (not m.target or m.target == name) then
+					as(name)
+					ns.handlers[m.kind](m.from, m.data, m.target and "WHISPER" or "GUILD", m.from)
+				end
+			end
+		end
+	end
+	-- Solo A anuncia su resumen: los demás piden lo que les falta y quien tiene de más anuncia
+	-- el suyo por su cuenta poco después; así hasta que todos cuadran.
+	for _, who in ipairs({ "A" }) do
+		as(who)
+		local gk = clients[who]
+		outbox[#outbox + 1] = { from = who, kind = "DSUM", data = { k = ns.SyncDigest(gk.kills), r = ns.SyncDigest(gk.runs) } }
+		deliver()
+	end
+	for name, c in pairs(clients) do
+		local nk, nr = 0, 0
+		for _ in pairs(c.kills) do nk = nk + 1 end
+		for _ in pairs(c.runs) do nr = nr + 1 end
+		assert(nk == #all and nr == #runs, ("%s acaba con todo: %d/%d bajas, %d/%d mazmorras"):format(name, nk, #all, nr, #runs))
+	end
+	-- Los cubos que el otro tiene de más, bien calculados.
+	local want, n = ns.BucketsTheyHaveMore({ Ana = { [85] = 1 } }, { Ana = { [85] = 2, [86] = 1 }, Bo = { [90] = 1 } })
+	assert(n == 3 and want.Bo[1] == 90, "cubos que faltan")
+	g.kills, g.runs, LG.Send, LG.ScheduleTimer, NOW, LG.SendParts = savedKills, savedRuns, savedSend, savedST, savedNow, savedParts
+	GET_TIME_OFFSET = savedOffset
+	ns.SetDigestState({ heard = -math.huge, sent = -math.huge, answered = {} })
+	print_("OK repaso entre conectados: tres miembros con huecos distintos acaban con lo mismo (bajas y mazmorras)")
+end
+
 
 -- SYNC grande en trozos: cada uno se comprime aparte (antes "script ran too long").
 do
@@ -2220,30 +2437,264 @@ end
 
 -- Tiempos: una partida completada por la estadística de jefe final (sin criatura, como en Forever) cuenta.
 do
-	g.runs["stat15027:test"] = { key = "stat15027:test", t = NOW, entered = NOW - 2602, instance = "Sima Ígnea", finalStat = 15027,
-		criterion = 19213, members = { ns.PlayerFullName() }, guildMembers = { ns.PlayerFullName() }, guildCount = 5, size = 5,
+	local team = { ns.PlayerFullName(), 'Ana Sol', 'Bo Uno', 'Cid Dos', 'Dan Tres' }
+	table.sort(team)
+	g.runs['stat15027:test'] = { key = 'stat15027:test', t = NOW, entered = NOW - 2602, instance = 'Sima Ígnea', finalStat = 15027,
+		criterion = 19213, members = team, guildMembers = team, guildCount = 5, size = 5,
 		witnesses = { [ns.PlayerFullName()] = true } }
 	local found
-	for _, d in ipairs(ns.DungeonTimes()) do
-		if d.dungeon == "Sima Ígnea" then
-			for _, run in ipairs(d.runs) do if run.duration == 2602 then found = true end end
-		end
+	for _, run in ipairs(ns.DungeonHistory()) do
+		if run.dungeon == 'Sima Ígnea' and run.duration == 2602 then found = true end
 	end
-	assert(found, "tiempo de Sima Ígnea por su estadística (43:22)")
-	-- Récords de facción: solo con grupo de hermandad (2 testigos con el addon, 4 de la guild).
+	assert(found, 'tiempo de Sima Ígnea por su estadística (43:22), en el historial')
+	-- Récords de facción: solo partidas oficiales vistas por 2 addons.
 	local function seasonTime()
 		local s = ns.GuildSeasonStats()
-		return s and s.dungeons["Sima Ígnea"]
+		return s and s.dungeons['Sima Ígnea']
 	end
-	local savedTime = seasonTime()
-	g.runs["stat15027:test"].duration = nil
-	g.runs["stat15027:test"].entered = NOW - 61 -- el más rápido, para que se vea si cuenta
-	assert(seasonTime() == savedTime, "un solo testigo: no es récord de la hermandad")
-	g.runs["stat15027:test"].witnesses["Ana Sol"] = true
-	assert(seasonTime() == 61, "grupo de hermandad con dos testigos: récord")
-	g.runs["stat15027:test"].guildCount = 2
-	assert(seasonTime() == savedTime, "grupo con desconocidos: no es récord de la hermandad")
-	g.runs["stat15027:test"] = nil
+	local savedTime, savedPaid = seasonTime(), ns.FeePaid
+	g.runs['stat15027:test'].entered = NOW - 61 -- el más rápido, para que se vea si cuenta
+	g.runs['stat15027:test'].witnesses['Ana Sol'] = true
+	assert(seasonTime() == savedTime, 'sin intento oficial: no es récord de la hermandad')
+	g.attempts['simatest'] = { id = 'simatest', by = ns.PlayerFullName(), t = NOW - 120, members = team }
+	for i, m in ipairs(team) do g.purchases['simapay' .. i] = { id = 'simapay' .. i, member = m, t = NOW - 110, item = 'officialRun', ref = 'simatest' } end
+	ns.FeePaid = function() return true end -- (los cobros de verdad dependen del libro de insignias)
+	assert(seasonTime() == 61, 'intento oficial pagado y dos testigos: récord')
+	g.runs['stat15027:test'].witnesses['Ana Sol'] = nil
+	assert(seasonTime() == savedTime, 'un solo testigo: no es récord de la hermandad')
+	g.runs['stat15027:test'].witnesses['Ana Sol'] = true
+	g.purchases['simapay3'] = nil
+	assert(seasonTime() == savedTime, 'falta un pago: no es récord')
+	ns.FeePaid = savedPaid
+	g.runs['stat15027:test'], g.attempts['simatest'] = nil, nil
+	for i = 1, 5 do g.purchases['simapay' .. i] = nil end
+end
+
+-- Datos de la partida (1.3): botín del grupo (raro o mejor), oro que sube (las reparaciones no
+-- restan), muertes propias; resúmenes de varios juntos en la partida y el sello «sin muertes».
+do
+	local me = ns.PlayerFullName()
+	local team = { me, "Ana Sol", "Bo Uno", "Cid Dos", "Dan Tres" }
+	table.sort(team)
+	local saved = { GII = GetInstanceInfo, GM = GetMoney, Q = C_Item.GetItemQualityByID, GC = ns.GroupComposition, Send = LG.Send, LI = LOOT_ITEM }
+	LOOT_ITEM = "%s recibe botín: %s."
+	local qualities = { [1001] = 3, [1002] = 4, [1003] = 2 }
+	C_Item.GetItemQualityByID = function(id) return qualities[id] end
+	ns.GroupComposition = function() local a = {} for i, m in ipairs(team) do a[i] = m end return a, { unpack(a) } end
+	local sent = {}
+	LG.Send = function(_, kind, data) sent[#sent + 1] = { kind = kind, data = data } end
+	local money = 1000
+	GetMoney = function() return money end
+	local instType = "party"
+	GetInstanceInfo = function() return "Horado Rajacieno", instType, 1, "", 5, 0, false, 47 end
+	-- Entrada nueva en Horado (antes, fuera, para que empiece otra).
+	instType = "none"; NOW = NOW + 4000; ns.TrackInstanceEntry()
+	instType = "party"; NOW = NOW + 4000; ns.TrackInstanceEntry()
+	local entered = ns.InstanceEnteredAt()
+	ns.OnRunMoney()
+	local function link(id, name) return ("|cff0070dd|Hitem:%d::::|h[%s]|h|r"):format(id, name) end
+	ns.OnRunLoot("Ana Sol recibe botín: " .. link(1001, "Espada azul") .. ".")
+	ns.OnRunLoot("Recibes botín: " .. link(1002, "Hacha épica") .. ".")
+	ns.OnRunLoot("Bo Uno recibe botín: " .. link(1003, "Botas verdes") .. ".") -- verde: no se apunta
+	money = 5000; ns.OnRunMoney()   -- +4000 de botín
+	money = 3000; ns.OnRunMoney()   -- reparar: no resta
+	money = 3500; ns.OnRunMoney()   -- +500
+	ns.OnRunDeath()
+	ns.SendRunStats()
+	local mine = sent[#sent].data
+	assert(sent[#sent].kind == "RUNSTAT" and mine.gold == 4500 and mine.deaths == 1 and #mine.loot == 2, ("mi resumen: %s oro, %s muertes, %s objetos"):format(mine.gold, mine.deaths, #mine.loot))
+	assert(mine.loot[1].who == "Ana Sol" and mine.loot[2].who == me, "quién se llevó cada cosa")
+	-- La partida (jefe final de Horado) y el resumen de otro miembro, sin muertes.
+	g.runs["rs1"] = { key = "rs1", t = NOW + 1500, entered = entered, started = entered + 60, instance = "Horado Rajacieno", instanceID = 47,
+		creatures = { 4421 }, encounterID = 9, boss = "Charlga", members = team, guildMembers = team, guildCount = 5, size = 5,
+		witnesses = { [me] = true, ["Ana Sol"] = true }, reporter = me }
+	assert(ns.MergeRunStats(g, { key = "Ana Sol:rs:47:" .. entered, reporter = "Ana Sol", t = NOW, instanceID = 47, entered = entered + 3,
+		members = team, gold = 2000, deaths = 0, loot = { { id = 1001, q = 3, who = "Ana Sol" } } }, "Ana Sol"), "resumen de otro")
+	assert(not ns.MergeRunStats(g, { key = "x", reporter = "Ana Sol", t = NOW, instanceID = 47, entered = entered, members = team }, "Impostor"), "cada uno firma el suyo")
+	local function thisRun()
+		for _, r in ipairs(ns.DungeonRuns()) do if r.recKeys.rs1 then return r end end
+	end
+	local run = thisRun()
+	assert(run.gold == 6500 and run.deaths == 1 and #run.loot == 2 and not run.flawless, ("partida: %d oro, %d muertes, %d objetos"):format(run.gold, run.deaths, #run.loot))
+	assert(run.loot[1].q == 4, "el épico, primero")
+	-- Si informan los cinco y nadie murió: sin muertes.
+	g.runStats[mine.key].deaths = 0
+	for _, m in ipairs({ "Bo Uno", "Cid Dos", "Dan Tres" }) do
+		ns.MergeRunStats(g, { key = m .. ":rs:47:" .. entered, reporter = m, t = NOW, instanceID = 47, entered = entered, members = team, gold = 0, deaths = 0, loot = {} }, m)
+	end
+	run = thisRun()
+	assert(run.flawless and run.allReported, "sin muertes con los cinco informando")
+	-- Vistas con clics.
+	ns.SelectTab("pve")
+	g.runs["rs1"] = nil
+	for k in pairs(g.runStats) do g.runStats[k] = nil end
+	GetInstanceInfo, GetMoney, C_Item.GetItemQualityByID, ns.GroupComposition, LG.Send, LOOT_ITEM = saved.GII, saved.GM, saved.Q, saved.GC, saved.Send, saved.LI
+	print_("OK datos de la partida: botín del grupo, oro sin reparaciones, muertes, resúmenes juntos y sin muertes")
+end
+
+-- Estandartes de hermandades enemigas: se guardan al ver a un miembro, se comparten limpios y
+-- JcJ > Objetivos los pinta de fondo.
+do
+	local savedGI = C_GuildInfo
+	local function col(r, gg, b) return { GetRGB = function() return r, gg, b end } end
+	C_GuildInfo = { GetGuildTabardInfo = function() return { backgroundColor = col(0.5, 0.1, 0.1), borderColor = col(0.9, 0.8, 0.1),
+		emblemColor = col(1, 1, 1), emblemFileID = 123456, emblemStyle = 42 } end }
+	g.guildTabards = {}
+	ns.CaptureTabard(g, "target", "Los Tabardos")
+	local t = g.guildTabards["Los Tabardos"]
+	assert(t and t.file == 123456 and t.style == 42 and t.bg[1] == 0.5, "estandarte guardado al ver a un miembro")
+	assert(not ns.MergeTabards(g, { ["Los Tabardos"] = { file = 1, t = 1, bg = { 0, 0, 0 }, emblem = { 0, 0, 0 } } }), "uno más antiguo no lo pisa")
+	assert(ns.MergeTabards(g, { ["Otra"] = { file = 7, t = NOW, bg = { 2, -1, 0.3 }, emblem = { 1, 1, 1 } }, [""] = "basura" }), "uno nuevo de otro miembro")
+	assert(g.guildTabards["Otra"].bg[1] == 1 and g.guildTabards["Otra"].bg[2] == 0, "colores saneados")
+	-- La vista de objetivos con un estandarte conocido.
+	g.kills["tabk"] = { id = "tabk", kind = "kill", t = NOW, reporter = "Uno", killerName = "Uno", victim = "Player-9-T", victimName = "V", guild = "Los Tabardos", honorable = true }
+	ns.SelectTab("hunt")
+	g.kills["tabk"], g.guildTabards = nil, {}
+	C_GuildInfo = savedGI
+	for name, want in pairs({ ["We Løve PvP"] = "WL", ["Nrage"] = "NR", ["Darkness of the Fallen"] = "DF", ["SEND THEM BACK"] = "ST", ["unemployed"] = "UN" }) do
+		assert(ns.GuildInitials(name) == want, name .. ": " .. tostring(ns.GuildInitials(name)))
+	end
+	assert(ns.GuildColor("Nrage") == ns.GuildColor("Nrage"), "mismo color siempre")
+	print_("OK estandartes: se guardan al verlos, se comparten saneados y se pintan en Objetivos")
+end
+
+-- Una muerte, una baja para la hermandad: 4 del grupo matan a uno (4 registros en 3 s) cuentan
+-- 1 en los totales y 1 para cada uno en los rankings; la misma víctima un minuto después, 2.ª muerte.
+do
+	local savedKills = g.kills
+	local function kill(id, who, t, victim)
+		return { id = id, kind = "kill", honorable = true, t = t, reporter = who, killerName = who, victim = victim, victimName = "Víctima" }
+	end
+	local t0 = NOW - 500
+	g.kills = {
+		a = kill("a", "Uno", t0, "Player-1-AAA"), b = kill("b", "Dos", t0 + 1, "Player-1-AAA"),
+		c = kill("c", "Tres", t0 + 2, "Player-1-AAA"), d = kill("d", "Cuatro", t0 + 3, "Player-1-AAA"),
+		e = kill("e", "Dos", t0 + 70, "Player-1-AAA"), -- resucitó y volvió: otra muerte
+		f = kill("f", "Uno", t0 + 1, "Player-1-BBB"), -- otra víctima a la vez: cuenta aparte
+	}
+	local dups = ns.DuplicateKills(g)
+	local n = 0
+	for _ in pairs(dups) do n = n + 1 end
+	assert(n == 3 and not dups.a and not dups.e and not dups.f, "3 copias de la misma muerte; la de otra víctima y la de después cuentan")
+	local board = ns.HunterBoard(7)
+	local each = {}
+	for _, e in ipairs(board) do each[e.name] = e.kills end
+	assert(each.Uno == 2 and each.Dos == 2 and each.Tres == 1 and each.Cuatro == 1, "en los rankings cada uno conserva su baja")
+	g.kills = savedKills
+	print_("OK una muerte, una baja: totales de hermandad sin copias, rankings personales intactos")
+end
+
+-- Muertes nuestras apuntadas dos veces (PLAYER_DEAD doble en Forever): la copia no cuenta ni avisa.
+do
+	local savedKills = g.kills
+	local t0 = NOW - 400
+	local function death(id, t, killer)
+		return { id = id, kind = "death", t = t, reporter = "Uno", victim = "Player-1-UNO", victimName = "Uno", killer = killer, killerName = killer, guild = "Nrage", zone = "Vega" }
+	end
+	g.kills = {
+		d1 = death("d1", t0, "Player-2-K"), d2 = death("d2", t0 + 1, "Player-2-K"), -- la misma, otra vez
+		d3 = death("d3", t0 + 120, "Player-2-K"), -- resucitó y volvió a caer: otra
+		d4 = death("d4", t0 + 2, "Player-2-OTRO"), -- otro asesino: otra
+	}
+	ns.InvalidateDuplicates()
+	local dups = ns.DuplicateKills(g)
+	assert(dups.d2 and not dups.d1 and not dups.d3 and not dups.d4, "muerte doble: solo la copia")
+	g.kills = savedKills
+	ns.InvalidateDuplicates()
+	-- En origen: dos PLAYER_DEAD seguidos con el mismo asesino apuntan una sola muerte.
+	local Hunt = ns.HuntModule
+	local before = 0
+	for _, k in pairs(g.kills) do if k.kind == "death" and k.reporter == me then before = before + 1 end end
+	Hunt.lastDeath = nil
+	Hunt:RecordDeath("Player-9-ASESINO")
+	Hunt:RecordDeath("Player-9-ASESINO")
+	local after = 0
+	for id, k in pairs(g.kills) do
+		if k.kind == "death" and k.reporter == me then after = after + 1 end
+	end
+	assert(after == before + 1, "muerte doble en origen: " .. (after - before))
+	for id, k in pairs(g.kills) do if k.killer == "Player-9-ASESINO" then g.kills[id] = nil end end
+	Hunt.lastDeath = nil
+	ns.InvalidateDuplicates()
+	print_("OK muertes dobles: la copia no cuenta y en origen solo se apunta una")
+end
+
+-- Intento oficial: validación, aviso de pago a los del grupo, declarar y ritmo contra el récord.
+do
+	local me = ns.PlayerFullName()
+	local team = { me, "Ana Sol", "Bo Uno", "Cid Dos", "Dan Tres" }
+	table.sort(team)
+	local saved = { GC = ns.GroupComposition, IG = IsInGroup, IR = IsInRaid, GII = GetInstanceInfo, AI = ns.AvailableInsignias,
+		Buy = ns.Buy, FP = ns.FeePaid, Send = LG.Send, Print = LG.Print, SPS = StaticPopup_Show, RN = RaidNotice_AddMessage, GA = ns.GuildAnnounce }
+	local sent, printed, popups, bought = {}, {}, {}, {}
+	ns.GroupComposition = function() local a = {} for i, m in ipairs(team) do a[i] = m end return a, { unpack(a) } end
+	IsInGroup = function() return true end
+	IsInRaid = function() return false end
+	GetInstanceInfo = function() return "Horado Rajacieno", "party", 1, "", 5, 0, false, 47 end
+	ns.AvailableInsignias = function() return 100 end
+	ns.Buy = function(item, ref) bought[#bought + 1] = { item = item, ref = ref } return true end
+	LG.Send = function(_, kind, data) sent[#sent + 1] = { kind = kind, data = data } end
+	LG.Print = function(_, text) printed[#printed + 1] = text end
+	StaticPopup_Show = function(name, text) popups[#popups + 1] = { name = name, text = text } return {} end
+	RaidNotice_AddMessage = function() end
+	ns.GuildAnnounce = function() end
+	-- Validación de lo que llega.
+	assert(not ns.MergeAttempt(g, { id = "x1", by = "Otro", t = NOW, members = team }, "Impostor"), "solo lo declara quien lo firma")
+	assert(not ns.MergeAttempt(g, { id = "x2", by = "Ana Sol", t = NOW, members = { "Ana Sol", "Bo Uno" } }, "Ana Sol"), "hace falta un grupo de 5 o más")
+	-- Lo declara otro del grupo: me sale el aviso para pagar.
+	ns.handlers.ATTEMPT("Ana Sol", { id = "att:ana", by = "Ana Sol", t = NOW, members = team })
+	assert(#popups == 1 and popups[1].name == "LANTUX_ATTEMPT", "aviso para pagar mi parte")
+	assert(ns.CurrentAttempt() and ns.CurrentAttempt().id == "att:ana", "intento en marcha de este grupo")
+	ns.PayAttempt("att:ana")
+	assert(bought[1].item == "officialRun" and bought[1].ref == "att:ana", "pago con la tasa del intento")
+	assert(not ns.DeclareAttempt(), "no se declara otro si ya hay uno en marcha")
+	g.attempts["att:ana"] = nil
+	-- Lo declaro yo: se manda y pago mi parte.
+	bought, sent = {}, {}
+	assert(ns.DeclareAttempt(), "declarar con el grupo entero")
+	assert(sent[1].kind == "ATTEMPT" and #sent[1].data.members == 5 and bought[1].item == "officialRun", "anuncio y pago al declarar")
+	local mine = ns.CurrentAttempt()
+	-- Con un desconocido no se puede.
+	g.attempts[mine.id] = nil
+	ns.GroupComposition = function() return { me, "Ana Sol", "Bo Uno", "Cid Dos", "Extraño" }, { me, "Ana Sol", "Bo Uno", "Cid Dos" } end
+	local ok, why = ns.DeclareAttempt()
+	assert(not ok and why:find("4/5"), "solo con el grupo entero de la hermandad")
+	ns.GroupComposition = function() local a = {} for i, m in ipairs(team) do a[i] = m end return a, { unpack(a) } end
+	-- Ritmo: récord oficial anterior (Charlga a los 10:00, final a los 30:00) y un intento pagado ahora.
+	g.attempts["old"] = { id = "old", by = me, t = NOW - 90000, members = team }
+	g.attempts["now"] = { id = "now", by = me, t = NOW - 1000, members = team }
+	for i, m in ipairs(team) do
+		g.purchases["oldpay" .. i] = { id = "oldpay" .. i, member = m, t = NOW - 89990, item = "officialRun", ref = "old" }
+		g.purchases["nowpay" .. i] = { id = "nowpay" .. i, member = m, t = NOW - 990, item = "officialRun", ref = "now" }
+	end
+	ns.FeePaid = function() return true end
+	local base = NOW - 86400
+	local function rec(key, t, entered, started, boss, enc, final)
+		return { key = key, t = t, entered = entered, started = started, instance = "Horado Rajacieno", instanceID = 47, boss = boss,
+			encounterID = enc, creatures = final and { 4421 } or nil, members = team, guildMembers = team, guildCount = 5, size = 5,
+			witnesses = { [me] = true, ["Ana Sol"] = true }, reporter = me }
+	end
+	g.runs["r1"] = rec("r1", base + 600, base - 100, base, "Charlga", 1)
+	g.runs["r2"] = rec("r2", base + 1800, base - 100, base, "Agathelos", 2, true)
+	local start = NOW - 900
+	local now1 = rec("n1", start + 480, start - 60, start, "Charlga", 1)
+	g.runs["n1"] = now1
+	printed = {}
+	ns.OnOfficialBoss(now1, false)
+	assert(printed[1] and printed[1]:find("2:00") and (printed[1]:find("delante") or printed[1]:find("ahead")), "ritmo: 2:00 por delante en Charlga: " .. tostring(printed[1]))
+	local now2 = rec("n2", start + 1700, start - 60, start, "Agathelos", 2, true)
+	g.runs["n2"] = now2
+	printed = {}
+	ns.OnOfficialBoss(now2, true)
+	assert(printed[1] and printed[1]:find("28:20"), "nuevo récord al caer el jefe final (28:20)")
+	-- Limpieza.
+	for _, k in ipairs({ "r1", "r2", "n1", "n2" }) do g.runs[k] = nil end
+	g.attempts["old"], g.attempts["now"] = nil, nil
+	for i = 1, 5 do g.purchases["oldpay" .. i], g.purchases["nowpay" .. i] = nil, nil end
+	ns.GroupComposition, IsInGroup, IsInRaid, GetInstanceInfo, ns.AvailableInsignias = saved.GC, saved.IG, saved.IR, saved.GII, saved.AI
+	ns.Buy, ns.FeePaid, LG.Send, LG.Print, StaticPopup_Show = saved.Buy, saved.FP, saved.Send, saved.Print, saved.SPS
+	RaidNotice_AddMessage, ns.GuildAnnounce = saved.RN, saved.GA
+	print_("OK intento oficial: firma, aviso de pago, grupo entero, ritmo contra el récord y nuevo récord")
 	print_("OK tiempos por estadística de jefe final")
 end
 
@@ -2418,6 +2869,35 @@ do
 	ns.SelectTab("faction")
 	LG.db.global.directory["Horda Rápida"] = nil
 	print_("OK facción: datos de temporada, saneado, clasificación")
+
+	-- Cazadores de la red: un anuncio de una versión antigua (sin cazadores) no borra los del
+	-- último completo; la propia hermandad se guarda pero no sale dos veces.
+	local faction = UnitFactionGroup("player")
+	ns.netHandlers.HI("Nuevo Uno", { guild = "Mezcla Vieja", faction = faction, members = 20,
+		hunters = { rec = { { n = "Racha Larga", v = 50 } } } })
+	ns.netHandlers.HI("Viejo Uno", { guild = "Mezcla Vieja", faction = faction, members = 21 })
+	local mixed = LG.db.global.directory["Mezcla Vieja"]
+	assert(mixed.members == 21 and mixed.hunters and mixed.hunters.rec[1].v == 50, "los cazadores sobreviven al anuncio antiguo")
+	-- Cobertura: un miembro con menos datos no pisa los números de uno más completo; uno con más, sí.
+	ns.netHandlers.HI("Completo", { guild = "Cobertura", faction = faction, cov = 900,
+		hunters = { rec = { { n = "Bueno", v = 50 } } }, stats = { season = ns.PvPSeason(), kills = 800 } })
+	ns.netHandlers.HI("Medias", { guild = "Cobertura", faction = faction, cov = 300,
+		hunters = { rec = { { n = "Parcial", v = 9 } } }, stats = { season = ns.PvPSeason(), kills = 250 } })
+	local cv = LG.db.global.directory["Cobertura"]
+	assert(cv.hunters.rec[1].n == "Bueno" and cv.stats.kills == 800 and cv.by == "Medias", "el anuncio a medias no pisa los números")
+	ns.netHandlers.HI("Mejor", { guild = "Cobertura", faction = faction, cov = 950,
+		hunters = { rec = { { n = "Nuevo", v = 51 } } }, stats = { season = ns.PvPSeason(), kills = 830 } })
+	cv = LG.db.global.directory["Cobertura"]
+	assert(cv.hunters.rec[1].n == "Nuevo" and cv.stats.kills == 830, "uno más completo los actualiza")
+	LG.db.global.directory["Cobertura"] = nil
+	ns.netHandlers.HI("Compañero", { guild = LG:GuildName(), faction = faction, members = 9, hunters = {} })
+	assert(LG.db.global.directory[LG:GuildName()], "la propia hermandad se guarda (para los alters)")
+	local seen = 0
+	for _, e in ipairs(ns.FactionGuilds()) do if e.guild == LG:GuildName() then seen = seen + 1 end end
+	for _, e in ipairs(ns.Directory()) do assert(e.guild ~= LG:GuildName(), "el directorio no devuelve la propia") end
+	assert(seen == 1, "la propia sale una sola vez en la facción")
+	LG.db.global.directory["Mezcla Vieja"], LG.db.global.directory[LG:GuildName()] = nil, nil
+	print_("OK red: cazadores con versiones mezcladas, propia hermandad para alters")
 end
 
 ns.RemoveTestData()

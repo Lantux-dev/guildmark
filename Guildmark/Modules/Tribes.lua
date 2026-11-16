@@ -524,7 +524,7 @@ function ns.TribeStats()
 			if together(names) then s.events = s.events + 1 end
 		end
 		for _, k in pairs(g.kills) do
-			if k.kind == "kill" and k.honorable and set[k.killerName or ""] and not ns.IsVoided(g, k.id) then s.kills = s.kills + 1 end
+			if k.kind == "kill" and k.honorable and set[k.killerName or ""] and not ns.IsVoided(g, k.id) and not ns.IsDuplicateKill(g, k.id) then s.kills = s.kills + 1 end
 		end
 		list[#list + 1] = s
 	end

@@ -214,12 +214,27 @@ local function learnedByGuild(g)
 	return all
 end
 
+-- Jefes finales aprendidos por la hermandad, por encuentro: [encounterID] = mazmorra (nombre del
+-- criterio de legado). Sirve para los tiempos de las mazmorras sin estadística de jefe final.
+function ns.LearnedFinalBosses(g)
+	local names = {}
+	for _, entry in ipairs(ns.LegacyList and ns.LegacyList() or {}) do
+		for _, c in ipairs(entry.criteria or {}) do if c.id then names[c.id] = c.name end end
+	end
+	local out = {}
+	for criteriaID, finals in pairs(learnedByGuild(g)) do
+		local name = names[tonumber(criteriaID)] or names[criteriaID]
+		if name then for encounterID in pairs(finals) do out[encounterID] = name end end
+	end
+	return out
+end
+
 ---------------------------------------------------------------------------
 -- Desafíos de hermandad
 ---------------------------------------------------------------------------
 
 -- Grupos de hermandad que cuentan: 5 jugadores con 4+ de la guild en mazmorra;
--- 80 % de la guild en banda; siempre con 2 testigos.
+-- Más de la mitad de la guild (ns.GuildMajority); siempre con 2 testigos.
 local function guildRuns(g)
 	local dungeons, raids = {}, {}
 	for _, r in pairs(g.runs) do
@@ -227,8 +242,8 @@ local function guildRuns(g)
 		for _ in pairs(r.witnesses or {}) do witnesses = witnesses + 1 end
 		if witnesses >= 2 then
 			if r.raid then
-				if (r.size or 0) >= 10 and (r.guildCount or 0) >= r.size * 0.8 then raids[#raids + 1] = r end
-			elseif r.size == 5 and (r.guildCount or 0) >= 4 then
+				if ns.GuildMajority(r) then raids[#raids + 1] = r end
+			elseif ns.GuildMajority(r) then
 				dungeons[#dungeons + 1] = r
 			end
 		end
@@ -251,7 +266,27 @@ end
 --   2. Si el criterio no tiene criatura ("Sima Ígnea o Salón de los Feudales"),
 --      por el encuentro aprendido.
 -- Devuelve done, cuándo, y si el jefe final aún no se conoce.
-local function dungeonDone(criterion, runs, learned)
+-- Índice de las partidas para dungeonDone: el primer momento por criterio y por criatura, y las
+-- partidas de cada encuentro. Rendimiento: recorrer todas las partidas (y sus jefes) por cada
+-- mazmorra del catálogo era más de la mitad del cálculo de logros.
+local function dungeonIndex(runs)
+	local idx = { byCriterion = {}, byNpc = {}, byEncounter = {} }
+	local function keepFirst(t, k, v)
+		if k ~= nil and (not t[k] or v < t[k]) then t[k] = v end
+	end
+	for _, r in ipairs(runs) do
+		keepFirst(idx.byCriterion, r.criterion, r.t)
+		for _, id in ipairs(type(r.creatures) == "table" and r.creatures or {}) do keepFirst(idx.byNpc, id, r.t) end
+		if r.encounterID then
+			local list = idx.byEncounter[r.encounterID] or {}
+			idx.byEncounter[r.encounterID] = list
+			list[#list + 1] = r
+		end
+	end
+	return idx
+end
+
+local function dungeonDone(criterion, runs, learned, idx)
 	local npc = tonumber(criterion.npc) or 0
 	local finals = learned[criterion.id]
 	local hasFinals = finals and next(finals) ~= nil
@@ -260,6 +295,17 @@ local function dungeonDone(criterion, runs, learned)
 		if s.criterion == criterion.id then byStat = true end
 	end
 	if npc == 0 and not hasFinals and not byStat then return false, nil, true end
+	if idx then
+		local first = idx.byCriterion[criterion.id]
+		local t = npc ~= 0 and idx.byNpc[npc]
+		if t and (not first or t < first) then first = t end
+		for encounterID, final in pairs(hasFinals and finals or {}) do
+			for _, r in ipairs(idx.byEncounter[encounterID] or {}) do
+				if (not final.instanceID or not r.instanceID or r.instanceID == final.instanceID) and (not first or r.t < first) then first = r.t end
+			end
+		end
+		return first ~= nil, first, false
+	end
 	local first
 	for _, r in ipairs(runs) do
 		local final = hasFinals and r.encounterID and finals[r.encounterID]
@@ -320,7 +366,7 @@ function ns.LegacyChallengeDefs()
 		local g = LG:GuildData()
 		if not g then return nil end
 		local dungeons, raids = guildRuns(g)
-		facts = { dungeons = dungeons, raids = raids, learned = learnedByGuild(g) }
+		facts = { dungeons = dungeons, raids = raids, learned = learnedByGuild(g), dungeonIdx = dungeonIndex(dungeons) }
 		return facts
 	end
 
@@ -332,15 +378,15 @@ function ns.LegacyChallengeDefs()
 			cat = isRaid and "raids" or "dungeons",
 			name = (L["%s (hermandad)"]):format(entry.name),
 			icon = entry.icon,
-			desc = isRaid and L["Derrotad a todos estos jefes con una banda de hermandad (80 % de la guild)."]
-				or L["Completad todas estas mazmorras con un grupo de hermandad (4 o 5 de la guild)."],
+			desc = isRaid and L["Derrotad a todos estos jefes con una banda de hermandad (más de la mitad de la guild)."]
+				or L["Completad todas estas mazmorras con un grupo de hermandad (3 o más de la guild)."],
 			eval = function()
 				local f = getFacts()
 				if not f then return 0, #entry.criteria end
 				local criteria, done, last = {}, 0, nil
 				for _, c in ipairs(entry.criteria) do
 					local ok, t, unknown
-					if isRaid then ok, t = raidBossDone(c, f.raids) else ok, t, unknown = dungeonDone(c, f.dungeons, f.learned) end
+					if isRaid then ok, t = raidBossDone(c, f.raids) else ok, t, unknown = dungeonDone(c, f.dungeons, f.learned, f.dungeonIdx) end
 					if ok then
 						done = done + 1
 						if not last or t > last then last = t end
@@ -357,11 +403,11 @@ function ns.LegacyChallengeDefs()
 					cat = "dungeons",
 					name = c.name,
 					icon = entry.icon,
-					desc = (L["Derrotad al jefe final de %s con un grupo de hermandad (4 o 5 de la guild)."]):format(c.name),
+					desc = (L["Derrotad al jefe final de %s con un grupo de hermandad (3 o más de la guild)."]):format(c.name),
 					eval = function()
 						local f = getFacts()
 						if not f then return 0, 1 end
-						local ok, t, unknown = dungeonDone(c, f.dungeons, f.learned)
+						local ok, t, unknown = dungeonDone(c, f.dungeons, f.learned, f.dungeonIdx)
 						local criteria = unknown and { { label = L["Jefe final por identificar: se aprende la primera vez que alguien con el addon completa esta mazmorra."], done = false } } or nil
 						return ok and 1 or 0, 1, t, criteria
 					end,

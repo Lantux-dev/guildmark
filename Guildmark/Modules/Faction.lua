@@ -12,11 +12,17 @@ local LG = ns.LG
 local MAX_DUNGEONS = 12
 
 -- Inicio de la temporada actual (la primera vez que este addon vio su número).
+-- La primera temporada empieza para todos en el lanzamiento de Forever (4 de noviembre de 2026,
+-- 00:00 UTC): si cada addon contara desde su instalación, la misma hermandad anunciaría
+-- totales distintos según quién la anunciara. Las siguientes, desde la primera vez que este
+-- addon ve su número (no hay fecha oficial que consultar).
+ns.SEASON1_START = 1793750400 -- las pruebas lo cambian (su reloj simulado es de antes)
 function ns.SeasonStart()
 	local season = ns.PvPSeason()
 	local starts = LG.db.global.seasonStarts
 	starts[season] = starts[season] or ns.Now()
-	return starts[season], season
+	if season <= 1 then return ns.SEASON1_START, season end
+	return math.max(starts[season], ns.SEASON1_START), season
 end
 
 -- Mejor tiempo de asalto por ciudad: de la declaración a la caída del líder.
@@ -40,7 +46,8 @@ function ns.GuildSeasonStats()
 	local guild = LG:GuildName()
 	local s = { season = season, kills = 0, deaths = 0, assaults = 0, regicides = 0, helps = 0, defended = 0, gmKills = 0 }
 	for _, k in pairs(g.kills) do
-		if k.t >= start and not ns.IsVoided(g, k.id) then
+		-- Una muerte, una baja: las copias de la misma muerte (grupo) no suman (ns.IsDuplicateKill).
+		if k.t >= start and not ns.IsVoided(g, k.id) and not ns.IsDuplicateKill(g, k.id) then
 			if k.kind == "kill" and k.victimGM and not k.bg then s.gmKills = s.gmKills + 1 end
 			if k.kind == "kill" and k.honorable then s.kills = s.kills + 1
 			elseif k.kind == "death" then s.deaths = s.deaths + 1 end

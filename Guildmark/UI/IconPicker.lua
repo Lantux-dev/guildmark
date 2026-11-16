@@ -73,6 +73,7 @@ local function create()
 	f.section = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.section:SetPoint("TOPLEFT", 18, -42)
 	f.close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	ns.FixCloseButton(f, f.close)
 	f.close:SetPoint("TOPRIGHT", -4, -4)
 
 	f.buttons = {}
